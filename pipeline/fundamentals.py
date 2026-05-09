@@ -109,20 +109,69 @@ def build_fundamentals(raw: dict) -> dict:
     ratios_a = listify(raw.get("ratios_annual"))
     km_a = listify(raw.get("key_metrics_annual"))
     income_a = listify(raw.get("income_annual"))
-    income_ttm = first(raw.get("income_ttm"))
     cf_a = listify(raw.get("cashflow_annual"))
-    cf_ttm = first(raw.get("cashflow_ttm"))
     bs_a = listify(raw.get("balance_annual"))
     bs_latest = bs_a[0] if bs_a else {}
+    income_q = listify(raw.get("income_quarter"))
+    cf_q = listify(raw.get("cashflow_quarter"))
+
+    # Build TTM by summing last 4 quarters (most reliable), fall back to dedicated TTM
+    # endpoint, then fall back to most-recent annual as last resort.
+    def _sum_quarters(quarters: list[dict], field: str) -> float | None:
+        vals = [_safe(q.get(field)) for q in quarters[:4]]
+        vals = [v for v in vals if v is not None]
+        return sum(vals) if len(vals) >= 2 else None
+
+    income_ttm_ep = first(raw.get("income_ttm"))
+    cf_ttm_ep = first(raw.get("cashflow_ttm"))
+
+    # Revenue TTM
+    revenue_ttm = (_sum_quarters(income_q, "revenue")
+                   or _safe(income_ttm_ep.get("revenue"))
+                   or _safe(income_a[0].get("revenue") if income_a else None))
+    # Net income TTM
+    net_income_ttm = (_sum_quarters(income_q, "netIncome")
+                      or _safe(income_ttm_ep.get("netIncome"))
+                      or _safe(income_a[0].get("netIncome") if income_a else None))
+    # EPS TTM (can't simply sum — use ratio endpoint or latest annual)
+    eps_ttm = (_safe(ratios_ttm.get("epsTTM"))
+               or _safe(income_ttm_ep.get("epsdiluted"))
+               or _safe(income_a[0].get("epsdiluted") if income_a else None))
+    # EBITDA TTM
+    ebitda_ttm = (_sum_quarters(income_q, "ebitda")
+                  or _safe(income_ttm_ep.get("ebitda"))
+                  or _safe(income_a[0].get("ebitda") if income_a else None))
+    # Operating income TTM
+    opincome_ttm = (_sum_quarters(income_q, "operatingIncome")
+                    or _safe(income_ttm_ep.get("operatingIncome"))
+                    or _safe(income_a[0].get("operatingIncome") if income_a else None))
+    # Other income TTM (for red-flags)
+    otherinc_ttm = (_sum_quarters(income_q, "otherIncome")
+                    or _safe(income_ttm_ep.get("otherIncome")))
+    # FCF / OCF TTM
+    fcf_ttm = (_sum_quarters(cf_q, "freeCashFlow")
+               or _safe(cf_ttm_ep.get("freeCashFlow"))
+               or _safe(cf_a[0].get("freeCashFlow") if cf_a else None))
+    ocf_ttm = (_sum_quarters(cf_q, "operatingCashFlow")
+               or _safe(cf_ttm_ep.get("operatingCashFlow"))
+               or _safe(cf_a[0].get("operatingCashFlow") if cf_a else None))
+    sbc_ttm = (_sum_quarters(cf_q, "stockBasedCompensation")
+               or _safe(cf_ttm_ep.get("stockBasedCompensation"))
+               or _safe(cf_a[0].get("stockBasedCompensation") if cf_a else None))
+
+    # Pseudo-TTM dict for downstream modules (red_flags etc.)
+    income_ttm: dict = {
+        "revenue": revenue_ttm, "netIncome": net_income_ttm,
+        "epsdiluted": eps_ttm, "ebitda": ebitda_ttm,
+        "operatingIncome": opincome_ttm, "otherIncome": otherinc_ttm,
+    }
+    cf_ttm: dict = {
+        "freeCashFlow": fcf_ttm, "operatingCashFlow": ocf_ttm,
+        "stockBasedCompensation": sbc_ttm,
+    }
 
     price = _safe(quote.get("price")) or _safe(profile.get("price"))
     market_cap = _safe(quote.get("marketCap")) or _safe(profile.get("mktCap"))
-
-    revenue_ttm = _safe(income_ttm.get("revenue"))
-    net_income_ttm = _safe(income_ttm.get("netIncome"))
-    eps_ttm = _safe(income_ttm.get("epsdiluted")) or _safe(income_ttm.get("eps"))
-    fcf_ttm = _safe(cf_ttm.get("freeCashFlow"))
-    ocf_ttm = _safe(cf_ttm.get("operatingCashFlow")) or _safe(cf_ttm.get("netCashProvidedByOperatingActivities"))
 
     rev_hist = _income_history(income_a, "revenue")
     net_hist = _income_history(income_a, "netIncome")
@@ -250,6 +299,11 @@ def build_fundamentals(raw: dict) -> dict:
         "total_equity": _safe(bs_latest.get("totalStockholdersEquity"))
             or _safe(bs_latest.get("totalEquity")),
     }
+
+    # Write computed TTM dicts back into raw so red_flags / valuation can reuse them
+    # without duplicating the fallback logic. Both modules call first(raw["income_ttm"]).
+    raw["_income_ttm_computed"] = income_ttm
+    raw["_cf_ttm_computed"] = cf_ttm
 
     return {
         "snapshot": snapshot,

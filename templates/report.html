@@ -69,6 +69,12 @@
 <!-- AI EXECUTIVE SUMMARY -->
 <section class="card hero">
   <h2>Executive read</h2>
+  {% if report.moat_hypothesis %}
+  <div class="hypothesis-box">
+    <span class="hyp-label">Your hypothesis</span>
+    <p>{{ report.moat_hypothesis }}</p>
+  </div>
+  {% endif %}
   <div class="ai-md">{{ ai.markdown | safe_markdown }}</div>
   <p class="hint">
     {% if ai.used_ai %}Model: {{ ai.model }} · {{ ai.input_tokens }} in / {{ ai.output_tokens }} out · ~${{ "%.4f"|format(ai.cost_usd) }}

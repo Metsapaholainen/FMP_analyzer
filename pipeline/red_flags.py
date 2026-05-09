@@ -20,8 +20,9 @@ def detect_red_flags(raw: dict, fundamentals: dict) -> list[dict]:
     income_a = listify(raw.get("income_annual"))
     cf_a = listify(raw.get("cashflow_annual"))
     bs_a = listify(raw.get("balance_annual"))
-    income_ttm = first(raw.get("income_ttm"))
-    cf_ttm = first(raw.get("cashflow_ttm"))
+    # Use the consolidated TTM dicts computed by fundamentals.build_fundamentals
+    income_ttm = raw.get("_income_ttm_computed") or first(raw.get("income_ttm"))
+    cf_ttm = raw.get("_cf_ttm_computed") or first(raw.get("cashflow_ttm"))
 
     # 1. OCF / NI accruals check (TTM)
     ni = _safe(income_ttm.get("netIncome"))

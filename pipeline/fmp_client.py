@@ -66,18 +66,20 @@ async def fetch_all(ticker: str) -> dict:
 
     async with httpx.AsyncClient() as client:
         tasks = {
-            "profile":       fmp_get(client, f"profile", {"symbol": t}),
-            "quote":         fmp_get(client, f"quote", {"symbol": t}),
-            "key_metrics_ttm": fmp_get(client, f"key-metrics-ttm", {"symbol": t}),
-            "ratios_ttm":    fmp_get(client, f"ratios-ttm", {"symbol": t}),
-            "ratios_annual": fmp_get(client, f"ratios", {"symbol": t, "period": "annual", "limit": 10}),
-            "key_metrics_annual": fmp_get(client, f"key-metrics", {"symbol": t, "period": "annual", "limit": 10}),
-            "income_annual": fmp_get(client, f"income-statement", {"symbol": t, "period": "annual", "limit": 10}),
-            "balance_annual": fmp_get(client, f"balance-sheet-statement", {"symbol": t, "period": "annual", "limit": 10}),
-            "cashflow_annual": fmp_get(client, f"cash-flow-statement", {"symbol": t, "period": "annual", "limit": 10}),
-            "cashflow_ttm":  fmp_get(client, f"cash-flow-statement-ttm", {"symbol": t}),
-            "income_ttm":    fmp_get(client, f"income-statement-ttm", {"symbol": t}),
-            "dcf":           fmp_get(client, f"discounted-cash-flow", {"symbol": t}),
+            "profile":            fmp_get(client, "profile", {"symbol": t}),
+            "quote":              fmp_get(client, "quote", {"symbol": t}),
+            "key_metrics_ttm":    fmp_get(client, "key-metrics-ttm", {"symbol": t}),
+            "ratios_ttm":         fmp_get(client, "ratios-ttm", {"symbol": t}),
+            "ratios_annual":      fmp_get(client, "ratios", {"symbol": t, "period": "annual", "limit": 10}),
+            "key_metrics_annual": fmp_get(client, "key-metrics", {"symbol": t, "period": "annual", "limit": 10}),
+            "income_annual":      fmp_get(client, "income-statement", {"symbol": t, "period": "annual", "limit": 10}),
+            "income_quarter":     fmp_get(client, "income-statement", {"symbol": t, "period": "quarter", "limit": 5}),
+            "balance_annual":     fmp_get(client, "balance-sheet-statement", {"symbol": t, "period": "annual", "limit": 10}),
+            "cashflow_annual":    fmp_get(client, "cash-flow-statement", {"symbol": t, "period": "annual", "limit": 10}),
+            "cashflow_quarter":   fmp_get(client, "cash-flow-statement", {"symbol": t, "period": "quarter", "limit": 5}),
+            "cashflow_ttm":       fmp_get(client, "cash-flow-statement-ttm", {"symbol": t}),
+            "income_ttm":         fmp_get(client, "income-statement-ttm", {"symbol": t}),
+            "dcf":                fmp_get(client, "discounted-cash-flow", {"symbol": t}),
         }
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 

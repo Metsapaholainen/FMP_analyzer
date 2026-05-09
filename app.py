@@ -83,7 +83,8 @@ def _safe_markdown(text: str) -> str:
     rendered = "\n".join(out_lines)
     # bold inline (after escape — safe to substitute on escaped text)
     rendered = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", rendered)
-    return rendered
+    from markupsafe import Markup
+    return Markup(rendered)
 
 
 templates.env.filters["safe_markdown"] = _safe_markdown
@@ -94,8 +95,10 @@ def _check_password(pwd: str) -> bool:
     return bool(pwd) and pwd == expected
 
 
-def _cache_path(ticker: str) -> Path:
-    return CACHE_DIR / f"{ticker.upper()}.json"
+def _cache_path(key: str) -> Path:
+    # key is either TICKER or TICKER_hypothesishash — sanitise for filesystem
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in key.upper())
+    return CACHE_DIR / f"{safe}.json"
 
 
 def _cache_get(ticker: str) -> dict | None:
@@ -128,7 +131,7 @@ def _cache_put(ticker: str, payload: dict) -> None:
     p.write_text(json.dumps(payload, default=str))
 
 
-async def run_pipeline(ticker: str) -> dict:
+async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
     """Run full Dorsey pipeline. Returns the report dict."""
     t0 = time.time()
     raw = await fetch_all(ticker)
@@ -140,13 +143,15 @@ async def run_pipeline(ticker: str) -> dict:
     moat = build_moat(raw, fundamentals)
     valuation = build_valuation(raw, fundamentals)
     red_flags = detect_red_flags(raw, fundamentals)
-    ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags)
+    ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
+                    moat_hypothesis=moat_hypothesis.strip())
 
     elapsed = round(time.time() - t0, 2)
     log.info("pipeline %s done in %.2fs (ai=%s, cost=$%.5f)",
              ticker, elapsed, ai["used_ai"], ai["cost_usd"])
     return {
         "ticker": ticker.upper(),
+        "moat_hypothesis": moat_hypothesis.strip(),
         "fundamentals": fundamentals,
         "moat": moat,
         "valuation": valuation,
@@ -169,6 +174,7 @@ async def analyze(
     request: Request,
     ticker: str = Form(...),
     password: str = Form(...),
+    moat_hypothesis: str = Form(default=""),
 ):
     if not _check_password(password):
         raise HTTPException(401, "Invalid password.")
@@ -177,14 +183,20 @@ async def analyze(
     if not t or not all(c.isalnum() or c in "-." for c in t) or len(t) > 10:
         raise HTTPException(400, "Invalid ticker.")
 
-    cached = _cache_get(t)
+    # Cache key includes a hash of the hypothesis so a fresh hypothesis bypasses cache
+    hyp = moat_hypothesis.strip()
+    import hashlib
+    hyp_hash = hashlib.md5(hyp.encode()).hexdigest()[:8] if hyp else "nohyp"
+    cache_key = f"{t}_{hyp_hash}"
+
+    cached = _cache_get(cache_key)
     if cached:
         report = cached
         report["_from_cache"] = True
     else:
-        report = await run_pipeline(t)
+        report = await run_pipeline(t, moat_hypothesis=hyp)
         report["_from_cache"] = False
-        _cache_put(t, report)
+        _cache_put(cache_key, report)
 
     return templates.TemplateResponse(
         "report.html",
