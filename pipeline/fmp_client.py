@@ -1,0 +1,107 @@
+"""FMP HTTP client. Ported from FMP_stock_screener.py:1505 (fmp_get) — adds async support."""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from typing import Any
+
+import httpx
+
+log = logging.getLogger(__name__)
+
+FMP_BASE = "https://financialmodelingprep.com/stable"
+FMP_BASE_V3 = "https://financialmodelingprep.com/api/v3"
+
+
+def _key() -> str:
+    k = os.environ.get("FMP_API_KEY", "")
+    if not k:
+        raise RuntimeError("FMP_API_KEY not set")
+    return k
+
+
+async def fmp_get(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    params: dict | None = None,
+    base: str = FMP_BASE,
+) -> Any:
+    """Single FMP call. Returns parsed JSON, [], or None on failure."""
+    url = f"{base}/{endpoint}"
+    p = dict(params or {})
+    p["apikey"] = _key()
+    try:
+        r = await client.get(url, params=p, timeout=20.0)
+    except httpx.HTTPError as e:
+        log.warning("FMP request error %s: %s", endpoint, e)
+        return None
+
+    if r.status_code == 429:
+        await asyncio.sleep(5)
+        try:
+            r = await client.get(url, params=p, timeout=20.0)
+        except httpx.HTTPError as e:
+            log.warning("FMP retry error %s: %s", endpoint, e)
+            return None
+
+    if r.status_code != 200:
+        log.warning("FMP %s on %s", r.status_code, endpoint)
+        return None
+
+    try:
+        data = r.json()
+    except ValueError:
+        return None
+    if isinstance(data, dict) and "Error Message" in data:
+        log.warning("FMP error on %s: %s", endpoint, str(data["Error Message"])[:80])
+        return None
+    return data
+
+
+async def fetch_all(ticker: str) -> dict:
+    """Pull every endpoint we need for a single-ticker analysis in parallel.
+    Returns dict keyed by logical name; values may be None/[] on failure (callers must handle)."""
+    t = ticker.upper().strip()
+
+    async with httpx.AsyncClient() as client:
+        tasks = {
+            "profile":       fmp_get(client, f"profile", {"symbol": t}),
+            "quote":         fmp_get(client, f"quote", {"symbol": t}),
+            "key_metrics_ttm": fmp_get(client, f"key-metrics-ttm", {"symbol": t}),
+            "ratios_ttm":    fmp_get(client, f"ratios-ttm", {"symbol": t}),
+            "ratios_annual": fmp_get(client, f"ratios", {"symbol": t, "period": "annual", "limit": 10}),
+            "key_metrics_annual": fmp_get(client, f"key-metrics", {"symbol": t, "period": "annual", "limit": 10}),
+            "income_annual": fmp_get(client, f"income-statement", {"symbol": t, "period": "annual", "limit": 10}),
+            "balance_annual": fmp_get(client, f"balance-sheet-statement", {"symbol": t, "period": "annual", "limit": 10}),
+            "cashflow_annual": fmp_get(client, f"cash-flow-statement", {"symbol": t, "period": "annual", "limit": 10}),
+            "cashflow_ttm":  fmp_get(client, f"cash-flow-statement-ttm", {"symbol": t}),
+            "income_ttm":    fmp_get(client, f"income-statement-ttm", {"symbol": t}),
+            "dcf":           fmp_get(client, f"discounted-cash-flow", {"symbol": t}),
+        }
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+    out = {}
+    for k, v in zip(tasks.keys(), results):
+        if isinstance(v, Exception):
+            log.warning("FMP fetch %s failed: %s", k, v)
+            out[k] = None
+        else:
+            out[k] = v
+    return out
+
+
+def first(data) -> dict:
+    """FMP often returns a list with one dict. Get the first or {}."""
+    if isinstance(data, list) and data:
+        first_el = data[0]
+        return first_el if isinstance(first_el, dict) else {}
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
+def listify(data) -> list[dict]:
+    if isinstance(data, list):
+        return [d for d in data if isinstance(d, dict)]
+    return []

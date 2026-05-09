@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FMP Analyzer — Dorsey-style stock analysis</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>FMP Analyzer</h1>
+    <p class="sub">Pat Dorsey-inspired three-step deep analysis: fundamentals → moat → margin of safety.</p>
+  </header>
+
+  <form method="POST" action="/analyze" class="card">
+    <label for="ticker">Ticker</label>
+    <input id="ticker" name="ticker" type="text" autocapitalize="characters" autocomplete="off"
+           inputmode="text" required maxlength="10" value="{{ ticker or '' }}"
+           placeholder="e.g. AAPL">
+    <label for="password">Access password</label>
+    <input id="password" name="password" type="password" required placeholder="password">
+    <button type="submit">Analyze</button>
+    <p class="hint">Cached 7 days per ticker. Powered by FMP + Claude Haiku 4.5 for the qualitative read.</p>
+  </form>
+
+  <section class="card">
+    <h2>The three steps</h2>
+    <ol>
+      <li><strong>Do your homework.</strong> Income statement, balance sheet, cash flow — every key ratio shown vs its own 10-year average / high / low. Anomalies are flagged.</li>
+      <li><strong>Find the moat.</strong> Quantitative fingerprint (sustained ROIC, FCF margin, gross-margin stability, capital allocation) plus a sector-specific qualitative checklist.</li>
+      <li><strong>Margin of safety.</strong> Two-stage DCF, FCF/EV cash return, multiples vs own history. Earnings-quality red flags called out separately.</li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>

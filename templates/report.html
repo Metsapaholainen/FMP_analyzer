@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ report.ticker }} — FMP Analyzer</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% set f = report.fundamentals %}
+{% set s = f.snapshot %}
+{% set m = f.metrics %}
+{% set g = f.growth %}
+{% set moat = report.moat %}
+{% set v = report.valuation %}
+{% set rf = report.red_flags %}
+{% set ai = report.ai %}
+
+{% macro pct(x) -%}
+  {%- if x is none -%}—{%- else -%}{{ "%.2f"|format(x*100) }}%{%- endif -%}
+{%- endmacro %}
+{% macro num(x, dp=2) -%}
+  {%- if x is none -%}—{%- else -%}{{ "{:,.{}f}".format(x, dp) }}{%- endif -%}
+{%- endmacro %}
+{% macro big(x) -%}
+  {%- if x is none -%}—
+  {%- elif x|abs >= 1e12 -%}{{ "%.2fT"|format(x/1e12) }}
+  {%- elif x|abs >= 1e9 -%}{{ "%.2fB"|format(x/1e9) }}
+  {%- elif x|abs >= 1e6 -%}{{ "%.2fM"|format(x/1e6) }}
+  {%- else -%}{{ "%.0f"|format(x) }}{%- endif -%}
+{%- endmacro %}
+
+{% macro bandrow(label, band, fmt='pct') %}
+{% if band %}
+<tr class="{{ 'flag-' ~ band.flag if band.flag }}">
+  <th>{{ label }}</th>
+  <td>{% if fmt == 'pct' %}{{ pct(band.current) }}{% else %}{{ num(band.current) }}{% endif %}</td>
+  <td>{% if fmt == 'pct' %}{{ pct(band.avg_10y) }}{% else %}{{ num(band.avg_10y) }}{% endif %}</td>
+  <td>{% if fmt == 'pct' %}{{ pct(band.high_10y) }}{% else %}{{ num(band.high_10y) }}{% endif %}</td>
+  <td>{% if fmt == 'pct' %}{{ pct(band.low_10y) }}{% else %}{{ num(band.low_10y) }}{% endif %}</td>
+  <td>{{ band.percentile_today if band.percentile_today is not none else "—" }}</td>
+  <td>{{ band.n_years }}</td>
+  <td>{% if band.flag %}<span class="flag-tag {{ band.flag }}">{{ band.flag.replace('_', ' ') }}</span>{% endif %}</td>
+</tr>
+{% endif %}
+{% endmacro %}
+
+<main class="wrap">
+<header>
+  <p><a href="/">← New analysis</a></p>
+  <h1>{{ s.name or report.ticker }} <span class="ticker">({{ report.ticker }})</span></h1>
+  <p class="sub">
+    {{ s.sector or '—' }} · {{ s.industry or '—' }} · {{ s.exchange or '—' }} · {{ s.country or '—' }}
+    {% if report._from_cache %}<span class="badge cache">Cached {{ "%.1f"|format(report._cache_age_days) }}d</span>
+    {% else %}<span class="badge fresh">Fresh ({{ "%.1f"|format(report._pipeline_seconds) }}s)</span>{% endif %}
+  </p>
+  <div class="snapshot-grid">
+    <div><span>Price</span><strong>${{ num(s.price) }}</strong></div>
+    <div><span>Market cap</span><strong>${{ big(s.market_cap) }}</strong></div>
+    <div><span>Enterprise value</span><strong>${{ big(v.enterprise_value) }}</strong></div>
+    <div><span>FCF (TTM)</span><strong>${{ big(s.fcf_ttm) }}</strong></div>
+    <div><span>Revenue (TTM)</span><strong>${{ big(s.revenue_ttm) }}</strong></div>
+    <div><span>Net income (TTM)</span><strong>${{ big(s.net_income_ttm) }}</strong></div>
+    <div><span>Total debt</span><strong>${{ big(s.total_debt) }}</strong></div>
+    <div><span>Cash</span><strong>${{ big(s.cash_and_equivalents) }}</strong></div>
+  </div>
+</header>
+
+<!-- AI EXECUTIVE SUMMARY -->
+<section class="card hero">
+  <h2>Executive read</h2>
+  <div class="ai-md">{{ ai.markdown | safe_markdown }}</div>
+  <p class="hint">
+    {% if ai.used_ai %}Model: {{ ai.model }} · {{ ai.input_tokens }} in / {{ ai.output_tokens }} out · ~${{ "%.4f"|format(ai.cost_usd) }}
+    {% else %}AI synthesis was skipped (see message above).{% endif %}
+  </p>
+</section>
+
+<!-- STEP 1 — FUNDAMENTALS -->
+<section class="card">
+  <h2>Step 1 — Do your homework</h2>
+  <p class="sub">Each metric vs its own 10-year average, high, low. Flagged when current is &gt;1σ from history.</p>
+
+  <h3>Valuation multiples</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Metric</th><th>Current</th><th>10Y avg</th><th>10Y high</th><th>10Y low</th><th>%ile</th><th>n</th><th>Flag</th></tr></thead>
+    <tbody>
+      {{ bandrow('P/E', m.pe, 'num') }}
+      {{ bandrow('P/S', m.ps, 'num') }}
+      {{ bandrow('P/B', m.pb, 'num') }}
+      {{ bandrow('PEG', m.peg, 'num') }}
+      {{ bandrow('Earnings yield', m.earnings_yield, 'pct') }}
+      {{ bandrow('Dividend yield', m.dividend_yield, 'pct') }}
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Profitability & returns on capital</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Metric</th><th>Current</th><th>10Y avg</th><th>10Y high</th><th>10Y low</th><th>%ile</th><th>n</th><th>Flag</th></tr></thead>
+    <tbody>
+      {{ bandrow('ROE', m.roe, 'pct') }}
+      {{ bandrow('ROA', m.roa, 'pct') }}
+      {{ bandrow('ROIC', m.roic, 'pct') }}
+      {{ bandrow('Gross margin', m.gross_margin, 'pct') }}
+      {{ bandrow('Operating margin', m.operating_margin, 'pct') }}
+      {{ bandrow('Net margin', m.net_margin, 'pct') }}
+      {{ bandrow('FCF margin', m.fcf_margin, 'pct') }}
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Solvency</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Metric</th><th>Current</th><th>10Y avg</th><th>10Y high</th><th>10Y low</th><th>%ile</th><th>n</th><th>Flag</th></tr></thead>
+    <tbody>
+      {{ bandrow('Debt / Equity', m.debt_to_equity, 'num') }}
+      {{ bandrow('Interest coverage', m.interest_coverage, 'num') }}
+      {{ bandrow('Current ratio', m.current_ratio, 'num') }}
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Growth (CAGR)</h3>
+  <div class="kvgrid">
+    <div><span>Revenue 3Y</span><strong>{{ pct(g.revenue_3y) }}</strong></div>
+    <div><span>Revenue 5Y</span><strong>{{ pct(g.revenue_5y) }}</strong></div>
+    <div><span>Revenue 10Y</span><strong>{{ pct(g.revenue_10y) }}</strong></div>
+    <div><span>EPS 3Y</span><strong>{{ pct(g.eps_3y) }}</strong></div>
+    <div><span>EPS 5Y</span><strong>{{ pct(g.eps_5y) }}</strong></div>
+    <div><span>EPS 10Y</span><strong>{{ pct(g.eps_10y) }}</strong></div>
+    <div><span>Net income 5Y</span><strong>{{ pct(g.net_income_5y) }}</strong></div>
+    <div><span>FCF 5Y</span><strong>{{ pct(g.fcf_5y) }}</strong></div>
+  </div>
+</section>
+
+<!-- STEP 2 — MOAT -->
+<section class="card">
+  <h2>Step 2 — Find the moat</h2>
+  <div class="moat-verdict">
+    <span class="big-score">{{ moat.score }}/100</span>
+    <strong>{{ moat.verdict }}</strong>
+  </div>
+
+  <h3>Quantitative fingerprint</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Component</th><th>Score</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for key, c in moat.components.items() %}
+      <tr>
+        <th>{{ key.replace('_', ' ').title() }}</th>
+        <td>{{ c.points }}/{{ c.max }}</td>
+        <td>
+          {% if c.threshold is defined %}≥{{ "%.0f"|format(c.threshold*100) }}% threshold,
+            {{ c.years_above_threshold }} of {{ moat.history_years.roic if 'roic' in key else moat.history_years.fcf_margin }} yrs above{% endif %}
+          {% if c.coefficient_of_variation is defined and c.coefficient_of_variation is not none %}CV={{ c.coefficient_of_variation }}, current GM {{ pct(c.current_gross_margin) }}{% endif %}
+          {% if c.gross_buybacks_5y is defined %}5Y gross ${{ big(c.gross_buybacks_5y) }} − SBC ${{ big(c.sbc_5y) }} = net ${{ big(c.net_buybacks_5y) }}{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Sector lens — {{ moat.sector_lens.label }}</h3>
+  <p class="sub">Primary moat sources for this sector: <strong>{{ moat.sector_lens.primary_moats | join(', ') }}</strong></p>
+  <ul class="checklist">
+    {% for item in moat.sector_lens.checklist %}<li>{{ item }}</li>{% endfor %}
+  </ul>
+</section>
+
+<!-- STEP 3 — VALUATION -->
+<section class="card">
+  <h2>Step 3 — Margin of safety</h2>
+  <div class="moat-verdict">
+    <strong>{{ v.verdict }}</strong>
+  </div>
+
+  {% if v.dcf %}
+  <h3>Two-stage DCF</h3>
+  <div class="kvgrid">
+    <div><span>Intrinsic value / share</span><strong>${{ num(v.dcf.intrinsic_value_per_share) }}</strong></div>
+    <div><span>Current price</span><strong>${{ num(v.dcf.current_price) }}</strong></div>
+    <div><span>Margin of safety</span><strong>{{ pct(v.dcf.margin_of_safety) }}</strong></div>
+    <div><span>FCF base used</span><strong>${{ big(v.dcf.fcf_base_used) }}</strong></div>
+    <div><span>Growth assumed</span><strong>{{ pct(v.dcf.growth_assumed) }}</strong></div>
+    <div><span>WACC</span><strong>{{ pct(v.dcf.wacc) }}</strong></div>
+    <div><span>Terminal g</span><strong>{{ pct(v.dcf.terminal_growth) }}</strong></div>
+    {% if v.fmp_dcf and v.fmp_dcf.value %}<div><span>FMP DCF (cross-check)</span><strong>${{ num(v.fmp_dcf.value) }}</strong></div>{% endif %}
+  </div>
+  <p class="hint">{{ v.dcf.method }}</p>
+  {% elif v.skip_dcf %}
+  <p class="hint">DCF skipped: not meaningful for {{ s.sector }}. Use book-value/AFFO-based metrics instead.</p>
+  {% else %}
+  <p class="hint">DCF unavailable (insufficient FCF history or negative base FCF).</p>
+  {% endif %}
+
+  {% if v.cash_return %}
+  <h3>Cash return (FCF / EV) — Dorsey</h3>
+  <div class="kvgrid">
+    <div><span>Cash return</span><strong>{{ pct(v.cash_return.value) }}</strong></div>
+    <div><span>Verdict</span><strong>{{ v.cash_return.verdict }}</strong></div>
+  </div>
+  <p class="hint">{{ v.cash_return.definition }}</p>
+  {% endif %}
+</section>
+
+<!-- RED FLAGS -->
+<section class="card">
+  <h2>Earnings-quality red flags</h2>
+  {% if rf %}
+    {% for f in rf %}
+    <div class="flag-card sev-{{ f.severity }}">
+      <div class="flag-head"><strong>{{ f.title }}</strong><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></div>
+      <p>{{ f.detail }}</p>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p>No red flags triggered. (Doesn't mean clean — verify against the 10K MD&A.)</p>
+  {% endif %}
+</section>
+
+<!-- DESCRIPTION -->
+{% if s.description %}
+<section class="card">
+  <h2>Business description (FMP)</h2>
+  <p>{{ s.description }}</p>
+  {% if s.website %}<p><a href="{{ s.website }}" rel="noopener" target="_blank">{{ s.website }}</a> · CEO {{ s.ceo or '—' }} · IPO {{ s.ipo_date or '—' }}</p>{% endif %}
+</section>
+{% endif %}
+
+<footer>
+  <p class="hint">Data: Financial Modeling Prep · Generated {{ report._generated_at if report._generated_at else 'just now' }}.
+  Not investment advice. Verify every number against primary filings before acting.</p>
+</footer>
+</main>
+</body>
+</html>
