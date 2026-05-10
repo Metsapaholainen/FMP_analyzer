@@ -164,6 +164,9 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
         "valuation": valuation,
         "red_flags": red_flags,
         "ai": ai,
+        # Store news/press-releases for in-page chat context (not full raw to keep cache small)
+        "_news": raw.get("stock_news") or [],
+        "_press_releases": raw.get("press_releases") or [],
         "_pipeline_seconds": elapsed,
     }
 

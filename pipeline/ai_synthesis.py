@@ -16,20 +16,51 @@ log = logging.getLogger(__name__)
 MODEL = "claude-haiku-4-5-20251001"
 
 
+def _news_snippet(item: dict, text_key: str = "text") -> str:
+    """Return first ~120 chars of body text if available."""
+    body = (item.get(text_key) or item.get("summary") or "").strip()
+    body = " ".join(body.split())  # collapse whitespace
+    return (" — " + body[:120] + ("…" if len(body) > 120 else "")) if body else ""
+
+
 def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
                   moat_hypothesis: str, raw: dict | None = None) -> str:
-    # News context block (up to 6 headlines)
+    # ── News & press releases block ────────────────────────────────────────
     news_raw = listify(raw.get("stock_news")) if raw else []
+    press_raw = listify(raw.get("press_releases")) if raw else []
+
     news_lines = []
-    for n in news_raw[:6]:
+    for n in news_raw[:12]:
         date = (n.get("publishedDate") or "")[:10]
         title = (n.get("title") or "").strip()
+        site = (n.get("site") or n.get("source") or "").strip()
         if title:
-            news_lines.append(f"  - [{date}] {title}")
-    news_block = (
-        "RECENT NEWS (use as qualitative moat signal context — do not treat as financial facts):\n"
-        + "\n".join(news_lines) + "\n\n"
-    ) if news_lines else ""
+            line = f"  - [{date}]"
+            if site:
+                line += f" ({site})"
+            line += f" {title}{_news_snippet(n)}"
+            news_lines.append(line)
+
+    pr_lines = []
+    for p in press_raw[:8]:
+        date = (p.get("date") or p.get("publishedDate") or "")[:10]
+        title = (p.get("title") or "").strip()
+        if title:
+            pr_lines.append(f"  - [{date}] {title}{_news_snippet(p)}")
+
+    news_block = ""
+    if news_lines:
+        news_block += (
+            "RECENT NEWS (treat capital allocation announcements, M&A, and guidance changes "
+            "as material facts; use sentiment/qualitative claims more cautiously):\n"
+            + "\n".join(news_lines) + "\n\n"
+        )
+    if pr_lines:
+        news_block += (
+            "COMPANY PRESS RELEASES (authoritative — treat buyback programs, strategic "
+            "partnerships, earnings guidance, and restructuring as confirmed facts):\n"
+            + "\n".join(pr_lines) + "\n\n"
+        )
 
     # Analyst consensus block
     analyst = valuation.get("analyst") or {}
@@ -247,15 +278,37 @@ def _build_chat_system(report: dict) -> str:
         "red_flags": [{"title": f["title"], "severity": f["severity"]} for f in flags[:8]],
     }
 
+    # Include recent news + press releases so chat can answer questions about
+    # announcements (buybacks, M&A, guidance) not visible in the scorecard.
+    news_raw = listify(report.get("_news"))
+    press_raw = listify(report.get("_press_releases"))
+    news_lines = []
+    for n in news_raw[:10]:
+        date = (n.get("publishedDate") or "")[:10]
+        title = (n.get("title") or "").strip()
+        if title:
+            news_lines.append(f"  - [{date}] {title}{_news_snippet(n)}")
+    pr_lines = []
+    for p in press_raw[:6]:
+        date = (p.get("date") or p.get("publishedDate") or "")[:10]
+        title = (p.get("title") or "").strip()
+        if title:
+            pr_lines.append(f"  - [{date}] {title}{_news_snippet(p)}")
+    news_ctx = ""
+    if news_lines:
+        news_ctx += "RECENT NEWS:\n" + "\n".join(news_lines) + "\n\n"
+    if pr_lines:
+        news_ctx += "PRESS RELEASES (treat as confirmed facts):\n" + "\n".join(pr_lines) + "\n\n"
+
     return (
         "You are a strict, evidence-driven equity analyst answering follow-up "
-        "questions about a report the user is currently reading. Answer ONLY from "
-        "the data in the scorecard and prior AI summary below. If a question requires "
-        "data not present (live news, real-time prices, transcripts), say so clearly "
-        "and suggest where the user could find it. Keep answers concise — 2-4 short "
-        "paragraphs or a tight bullet list. Be direct: agree, disagree, or call out "
-        "uncertainty. Never invent numbers.\n\n"
+        "questions about a report the user is currently reading. Answer from "
+        "the data in the scorecard, news, and prior AI summary below. If a question "
+        "requires data not present here (live prices, full transcripts), say so and "
+        "suggest where to find it. Keep answers concise — 2-4 short paragraphs or a "
+        "tight bullet list. Be direct. Never invent numbers.\n\n"
         f"SCORECARD:\n```json\n{json.dumps(scorecard, indent=2, default=str)}\n```\n\n"
+        f"{news_ctx}"
         f"PRIOR AI SUMMARY (already shown to the user):\n{ai_md}\n"
     )
 
