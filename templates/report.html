@@ -141,6 +141,21 @@
     <div><span>Net income 5Y</span><strong>{{ pct(g.net_income_5y) }}</strong></div>
     <div><span>FCF 5Y</span><strong>{{ pct(g.fcf_5y) }}</strong></div>
   </div>
+
+  {% if s.piotroski_score is not none or s.altman_z_score is not none or s.owner_earnings_ttm is not none %}
+  <h3>Financial health scores</h3>
+  <div class="kvgrid">
+    {% if s.piotroski_score is not none %}
+    <div><span>Piotroski F-score</span><strong>{{ s.piotroski_score }}/9</strong></div>
+    {% endif %}
+    {% if s.altman_z_score is not none %}
+    <div><span>Altman Z-score</span><strong>{{ num(s.altman_z_score) }}</strong></div>
+    {% endif %}
+    {% if s.owner_earnings_ttm is not none %}
+    <div><span>Owner earnings (TTM)</span><strong>${{ big(s.owner_earnings_ttm) }}</strong></div>
+    {% endif %}
+  </div>
+  {% endif %}
 </section>
 
 <!-- STEP 2 — MOAT -->
@@ -192,7 +207,7 @@
     <div><span>Intrinsic value / share</span><strong>${{ num(v.dcf.intrinsic_value_per_share) }}</strong></div>
     <div><span>Current price</span><strong>${{ num(v.dcf.current_price) }}</strong></div>
     <div><span>Margin of safety</span><strong>{{ pct(v.dcf.margin_of_safety) }}</strong></div>
-    <div><span>FCF base used</span><strong>${{ big(v.dcf.fcf_base_used) }}</strong></div>
+    <div><span>FCF base used</span><strong>${{ big(v.dcf.fcf_base_used) }}{% if v.dcf.base_label %} <span style="font-weight:400;font-size:0.8rem;color:var(--mute)">({{ v.dcf.base_label }})</span>{% endif %}</strong></div>
     <div><span>Growth assumed</span><strong>{{ pct(v.dcf.growth_assumed) }}</strong></div>
     <div><span>WACC</span><strong>{{ pct(v.dcf.wacc) }}</strong></div>
     <div><span>Terminal g</span><strong>{{ pct(v.dcf.terminal_growth) }}</strong></div>
@@ -212,6 +227,24 @@
     <div><span>Verdict</span><strong>{{ v.cash_return.verdict }}</strong></div>
   </div>
   <p class="hint">{{ v.cash_return.definition }}</p>
+  {% endif %}
+
+  {% if v.analyst %}
+  <h3>Analyst consensus</h3>
+  <div class="kvgrid">
+    {% if v.analyst.target_consensus is not none %}
+    <div><span>Consensus target</span><strong>${{ num(v.analyst.target_consensus) }}</strong></div>
+    {% endif %}
+    {% if v.analyst.target_median is not none %}
+    <div><span>Median target</span><strong>${{ num(v.analyst.target_median) }}</strong></div>
+    {% endif %}
+    {% if v.analyst.target_high is not none %}
+    <div><span>High / Low target</span><strong>${{ num(v.analyst.target_high) }} / ${{ num(v.analyst.target_low) }}</strong></div>
+    {% endif %}
+    {% if v.analyst.buy is not none %}
+    <div><span>Buy / Hold / Sell</span><strong>{{ v.analyst.buy }} / {{ v.analyst.hold or '—' }} / {{ v.analyst.sell or '—' }}</strong></div>
+    {% endif %}
+  </div>
   {% endif %}
 </section>
 

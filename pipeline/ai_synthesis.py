@@ -9,13 +9,47 @@ import json
 import logging
 import os
 
+from .fmp_client import listify
+
 log = logging.getLogger(__name__)
 
 MODEL = "claude-haiku-4-5-20251001"
 
 
 def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
-                  moat_hypothesis: str) -> str:
+                  moat_hypothesis: str, raw: dict | None = None) -> str:
+    # News context block (up to 6 headlines)
+    news_raw = listify(raw.get("stock_news")) if raw else []
+    news_lines = []
+    for n in news_raw[:6]:
+        date = (n.get("publishedDate") or "")[:10]
+        title = (n.get("title") or "").strip()
+        if title:
+            news_lines.append(f"  - [{date}] {title}")
+    news_block = (
+        "RECENT NEWS (use as qualitative moat signal context — do not treat as financial facts):\n"
+        + "\n".join(news_lines) + "\n\n"
+    ) if news_lines else ""
+
+    # Analyst consensus block
+    analyst = valuation.get("analyst") or {}
+    analyst_lines = []
+    if analyst.get("target_consensus") is not None:
+        analyst_lines.append(
+            f"Price targets: consensus ${analyst['target_consensus']:.2f}, "
+            f"median ${analyst.get('target_median') or '—'}, "
+            f"high ${analyst.get('target_high') or '—'}, "
+            f"low ${analyst.get('target_low') or '—'}"
+        )
+    if analyst.get("buy") is not None:
+        analyst_lines.append(
+            f"Ratings: {analyst['buy']} Buy / {analyst.get('hold') or '—'} Hold / "
+            f"{analyst.get('sell') or '—'} Sell"
+        )
+    analyst_block = (
+        "ANALYST CONSENSUS:\n" + "\n".join(f"  {l}" for l in analyst_lines) + "\n\n"
+    ) if analyst_lines else ""
+
     scorecard = {
         "ticker": snapshot.get("ticker"),
         "name": snapshot.get("name"),
@@ -32,6 +66,9 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         "valuation_verdict": valuation.get("verdict"),
         "cash_return": valuation.get("cash_return"),
         "dcf": valuation.get("dcf"),
+        "owner_earnings_ttm": snapshot.get("owner_earnings_ttm"),
+        "piotroski_score": snapshot.get("piotroski_score"),
+        "altman_z_score": snapshot.get("altman_z_score"),
         "red_flags": [{"title": f["title"], "severity": f["severity"]} for f in red_flags[:8]],
     }
 
@@ -52,6 +89,7 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         "stability). If the data doesn't support one, say so clearly. Avoid false positives. "
         "But also: if the data is early-stage or limited, note what additional evidence would "
         "confirm or deny the moat rather than defaulting to 'no moat'.\n\n"
+        f"{news_block}{analyst_block}"
         f"SCORECARD:\n```json\n{json.dumps(scorecard, indent=2, default=str)}\n```"
         f"{hypothesis_block}\n\n"
         "OUTPUT FORMAT (markdown, total ~450 words max):\n\n"
@@ -75,7 +113,7 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
 
 
 def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
-               moat_hypothesis: str = "") -> dict:
+               moat_hypothesis: str = "", raw: dict | None = None) -> dict:
     """Returns {markdown, model, input_tokens, output_tokens, cost_usd, used_ai}."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return _fallback(snapshot, moat, valuation, moat_hypothesis,
@@ -85,7 +123,7 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
     except ImportError:
         return _fallback(snapshot, moat, valuation, moat_hypothesis, "anthropic SDK not installed.")
 
-    prompt = _build_prompt(snapshot, moat, valuation, red_flags, moat_hypothesis)
+    prompt = _build_prompt(snapshot, moat, valuation, red_flags, moat_hypothesis, raw=raw)
 
     try:
         client = anthropic.Anthropic()

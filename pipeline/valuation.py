@@ -101,13 +101,41 @@ def build_valuation(raw: dict, fundamentals: dict) -> dict:
         out["cash_return"] = None
 
     # DCF (skip for financials/REITs)
-    if not out["skip_dcf"] and fcf_ttm and shares and price and not out["skip_dcf"]:
+    if not out["skip_dcf"] and shares and price:
         cf_a = listify(raw.get("cashflow_annual"))
-        fcf_recent = [c.get("freeCashFlow") for c in cf_a[:3] if c.get("freeCashFlow") is not None]
-        fcf_recent.append(fcf_ttm)
-        fcf_base = sum(fcf_recent) / len(fcf_recent)
 
-        if fcf_base > 0:
+        # 1. Try owner earnings TTM (sum of 4 quarters — more stable than FCF for restructuring cos)
+        oe_q = listify(raw.get("owner_earnings"))
+        oe_base = None
+        if oe_q:
+            oe_vals = [_safe(q.get("ownerEarnings")) for q in oe_q[:4]]
+            oe_vals = [v for v in oe_vals if v is not None]
+            if len(oe_vals) >= 2:
+                oe_base = sum(oe_vals)
+
+        # 2. Only blend positive historical annual FCF years (negative years drag the average unfairly)
+        pos_fcf = [_safe(c.get("freeCashFlow")) for c in cf_a[:5]
+                   if _safe(c.get("freeCashFlow")) is not None and _safe(c.get("freeCashFlow")) > 0]
+
+        # 3. Pick the best available base
+        if oe_base and oe_base > 0:
+            fcf_base = oe_base
+            base_label = "owner earnings TTM"
+        elif pos_fcf:
+            hist_avg = sum(pos_fcf) / len(pos_fcf)
+            if fcf_ttm and fcf_ttm > 0:
+                fcf_base = (hist_avg + fcf_ttm) / 2
+            else:
+                fcf_base = hist_avg
+            base_label = f"avg {len(pos_fcf)} positive FCF yrs"
+        elif fcf_ttm and fcf_ttm > 0:
+            fcf_base = fcf_ttm
+            base_label = "FCF TTM only"
+        else:
+            fcf_base = None
+            base_label = ""
+
+        if fcf_base and fcf_base > 0:
             g = growth.get("revenue_5y") or growth.get("eps_5y") or 0.05
             try:
                 g = float(g)
@@ -126,6 +154,7 @@ def build_valuation(raw: dict, fundamentals: dict) -> dict:
                     "current_price": round(price, 2),
                     "margin_of_safety": round(discount, 4),
                     "fcf_base_used": round(fcf_base, 0),
+                    "base_label": base_label,
                     "growth_assumed": round(g, 4),
                     "wacc": round(wacc, 4),
                     "terminal_growth": 0.025,
@@ -145,6 +174,22 @@ def build_valuation(raw: dict, fundamentals: dict) -> dict:
             "value": _safe(fmp_dcf.get("dcf")),
             "as_of": fmp_dcf.get("date"),
         }
+
+    # Analyst consensus (price targets + ratings)
+    pt = first(raw.get("price_targets"))
+    grades = first(raw.get("analyst_grades"))
+    if pt or grades:
+        out["analyst"] = {
+            "target_consensus": _safe(pt.get("targetConsensus")) if pt else None,
+            "target_median": _safe(pt.get("targetMedian")) if pt else None,
+            "target_high": _safe(pt.get("targetHigh")) if pt else None,
+            "target_low": _safe(pt.get("targetLow")) if pt else None,
+            "buy": ((grades.get("strongBuy") or 0) + (grades.get("buy") or 0)) if grades else None,
+            "hold": grades.get("hold") if grades else None,
+            "sell": ((grades.get("sell") or 0) + (grades.get("strongSell") or 0)) if grades else None,
+        }
+    else:
+        out["analyst"] = None
 
     # Multiples summary (re-pulled from fundamentals)
     out["multiples"] = {

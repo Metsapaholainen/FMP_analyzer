@@ -144,7 +144,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
     valuation = build_valuation(raw, fundamentals)
     red_flags = detect_red_flags(raw, fundamentals)
     ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
-                    moat_hypothesis=moat_hypothesis.strip())
+                    moat_hypothesis=moat_hypothesis.strip(), raw=raw)
 
     elapsed = round(time.time() - t0, 2)
     log.info("pipeline %s done in %.2fs (ai=%s, cost=$%.5f)",

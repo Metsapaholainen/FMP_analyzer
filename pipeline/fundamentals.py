@@ -159,6 +159,24 @@ def build_fundamentals(raw: dict) -> dict:
                or _safe(cf_ttm_ep.get("stockBasedCompensation"))
                or _safe(cf_a[0].get("stockBasedCompensation") if cf_a else None))
 
+    # Owner earnings TTM (Buffett: NI + D&A - maintenance capex, more stable than FCF)
+    oe_q = listify(raw.get("owner_earnings"))
+    owner_earnings_ttm = None
+    if oe_q:
+        oe_vals = [_safe(q.get("ownerEarnings")) for q in oe_q[:4]]
+        oe_vals = [v for v in oe_vals if v is not None]
+        if len(oe_vals) >= 2:
+            owner_earnings_ttm = sum(oe_vals)
+
+    # Financial health scores
+    fs = first(raw.get("financial_scores"))
+    piotroski_score = None
+    altman_z_score = None
+    if fs:
+        raw_p = fs.get("piotroskiScore")
+        piotroski_score = int(raw_p) if raw_p is not None else None
+        altman_z_score = _safe(fs.get("altmanZScore"))
+
     # Pseudo-TTM dict for downstream modules (red_flags etc.)
     income_ttm: dict = {
         "revenue": revenue_ttm, "netIncome": net_income_ttm,
@@ -298,6 +316,9 @@ def build_fundamentals(raw: dict) -> dict:
             or _safe(bs_latest.get("cashAndShortTermInvestments")),
         "total_equity": _safe(bs_latest.get("totalStockholdersEquity"))
             or _safe(bs_latest.get("totalEquity")),
+        "owner_earnings_ttm": owner_earnings_ttm,
+        "piotroski_score": piotroski_score,
+        "altman_z_score": altman_z_score,
     }
 
     # Write computed TTM dicts back into raw so red_flags / valuation can reuse them

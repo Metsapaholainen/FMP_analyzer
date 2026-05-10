@@ -146,4 +146,46 @@ def detect_red_flags(raw: dict, fundamentals: dict) -> list[dict]:
                               "expansion (bad) — read the MD&A to distinguish.",
                 })
 
+    # 8. Piotroski F-score (low = deteriorating financial health)
+    piotroski = snap.get("piotroski_score")
+    if piotroski is not None:
+        if piotroski <= 2:
+            flags.append({
+                "code": "piotroski_low",
+                "severity": "high",
+                "title": f"Piotroski F-score critically low ({piotroski}/9)",
+                "detail": (f"F-score of {piotroski}/9 signals broad deterioration across "
+                           f"profitability, leverage, and operating efficiency. "
+                           f"Historically associated with underperformance."),
+            })
+        elif piotroski <= 3:
+            flags.append({
+                "code": "piotroski_weak",
+                "severity": "medium",
+                "title": f"Piotroski F-score weak ({piotroski}/9)",
+                "detail": (f"F-score of {piotroski}/9 indicates financial deterioration on multiple "
+                           f"dimensions. Investigate profitability and leverage trends."),
+            })
+
+    # 9. Altman Z-score (distress zone)
+    altman_z = snap.get("altman_z_score")
+    if altman_z is not None:
+        altman_z_f = _safe(altman_z)
+        if altman_z_f is not None and altman_z_f < 1.23:
+            flags.append({
+                "code": "altman_distress",
+                "severity": "high",
+                "title": f"Altman Z-score in distress zone ({altman_z_f:.2f})",
+                "detail": ("Z-score below 1.23 is the distress zone with elevated bankruptcy risk. "
+                           "Zone: <1.23 distress, 1.23–2.99 grey, >2.99 safe."),
+            })
+        elif altman_z_f is not None and altman_z_f < 1.81:
+            flags.append({
+                "code": "altman_grey",
+                "severity": "medium",
+                "title": f"Altman Z-score in grey zone ({altman_z_f:.2f})",
+                "detail": ("Z-score between 1.23 and 1.81 is the grey zone. "
+                           "Financial fragility is elevated — monitor liquidity carefully."),
+            })
+
     return flags

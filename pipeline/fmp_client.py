@@ -80,6 +80,11 @@ async def fetch_all(ticker: str) -> dict:
             "cashflow_ttm":       fmp_get(client, "cash-flow-statement-ttm", {"symbol": t}),
             "income_ttm":         fmp_get(client, "income-statement-ttm", {"symbol": t}),
             "dcf":                fmp_get(client, "discounted-cash-flow", {"symbol": t}),
+            "owner_earnings":     fmp_get(client, "owner-earnings", {"symbol": t, "limit": 5}),
+            "financial_scores":   fmp_get(client, "financial-scores", {"symbol": t}),
+            "stock_news":         fmp_get(client, "stock-news", {"tickers": t, "limit": 8}),
+            "price_targets":      fmp_get(client, "price-target-consensus", {"symbol": t}),
+            "analyst_grades":     fmp_get(client, "grades-summary", {"symbol": t}),
         }
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
