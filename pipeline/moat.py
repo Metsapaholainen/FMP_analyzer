@@ -42,7 +42,7 @@ def build_moat(raw: dict, fundamentals: dict) -> dict:
     km_a = listify(raw.get("key_metrics_annual"))
     ratios_a = listify(raw.get("ratios_annual"))
 
-    roic_hist = [r.get("roic") for r in km_a]
+    roic_hist = [r.get("returnOnInvestedCapital") or r.get("roic") for r in km_a]
     gross_margin_hist = [r.get("grossProfitMargin") for r in ratios_a]
     fcf_margin_hist = []
     for c, i in zip(cf_a, income_a):

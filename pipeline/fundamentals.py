@@ -266,7 +266,8 @@ def build_fundamentals(raw: dict) -> dict:
     )
     metrics["roic"] = _band(
         km_ttm.get("roicTTM") or ratios_ttm.get("returnOnInvestedCapitalTTM"),
-        _km_history(km_a, "roic"),
+        [r.get("returnOnInvestedCapital") or r.get("roic") for r in km_a
+         if (r.get("returnOnInvestedCapital") or r.get("roic")) is not None],
     )
     metrics["gross_margin"] = _band(
         ratios_ttm.get("grossProfitMarginTTM"),
