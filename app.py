@@ -27,6 +27,7 @@ from pipeline.valuation import build_valuation
 from pipeline.red_flags import detect_red_flags
 from pipeline.ai_synthesis import synthesize, chat_followup
 from pipeline.ceo_analysis import build_ceo_analysis
+from pipeline.competition import build_competition
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -144,11 +145,13 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
     moat = build_moat(raw, fundamentals)
     story_moat = build_story_moat(raw, fundamentals, moat)
     growth_moat = build_growth_moat(raw, fundamentals, moat)
+    competition = build_competition(raw, fundamentals)
     ceo = build_ceo_analysis(raw, fundamentals, moat)
     valuation = build_valuation(raw, fundamentals)
     red_flags = detect_red_flags(raw, fundamentals)
     ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
-                    moat_hypothesis=moat_hypothesis.strip(), raw=raw)
+                    moat_hypothesis=moat_hypothesis.strip(), raw=raw,
+                    competition=competition)
 
     elapsed = round(time.time() - t0, 2)
     log.info("pipeline %s done in %.2fs (ai=%s, cost=$%.5f)",
@@ -160,6 +163,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
         "moat": moat,
         "story_moat": story_moat,
         "growth_moat": growth_moat,
+        "competition": competition,
         "ceo": ceo,
         "valuation": valuation,
         "red_flags": red_flags,

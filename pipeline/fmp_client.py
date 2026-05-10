@@ -95,17 +95,56 @@ async def fetch_all(ticker: str) -> dict:
             "sec_filings":        fmp_get(client, "sec-filings-search/symbol",
                                           {"symbol": t, "from": sec_from, "to": sec_to, "limit": 100}),
             "insider_trades":     fmp_get(client, "insider-trading/search", {"symbol": t, "limit": 50}),
+            "peers":              fmp_get(client, "stock-peers", {"symbol": t}),
+            "sector_pe":          fmp_get(client, "sector-pe-snapshot", {"date": sec_to}),
             # institutional ownership endpoints require paid FMP tier — skipped
         }
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
-    out = {}
-    for k, v in zip(tasks.keys(), results):
-        if isinstance(v, Exception):
-            log.warning("FMP fetch %s failed: %s", k, v)
-            out[k] = None
-        else:
-            out[k] = v
+        out = {}
+        for k, v in zip(tasks.keys(), results):
+            if isinstance(v, Exception):
+                log.warning("FMP fetch %s failed: %s", k, v)
+                out[k] = None
+            else:
+                out[k] = v
+
+        # Second-stage parallel fetch: peer financials for competition scoring.
+        # Cap at 5 peers to bound cost (~15 extra calls) — runs in parallel so ~1s wall.
+        peer_tickers: list[str] = []
+        peers_raw = out.get("peers")
+        if isinstance(peers_raw, list) and peers_raw:
+            # FMP returns either [{"symbol":..., "peersList":[...]}] or a flat list of {"symbol":...}
+            head = peers_raw[0] if isinstance(peers_raw[0], dict) else {}
+            if "peersList" in head:
+                peer_tickers = [p for p in (head.get("peersList") or []) if isinstance(p, str)][:5]
+            else:
+                peer_tickers = [p.get("symbol") for p in peers_raw
+                                if isinstance(p, dict) and p.get("symbol") and p.get("symbol") != t][:5]
+
+        peer_metrics: dict[str, dict] = {}
+        if peer_tickers:
+            async def _fetch_peer(pt: str) -> tuple[str, dict]:
+                km, rt, pf = await asyncio.gather(
+                    fmp_get(client, "key-metrics-ttm", {"symbol": pt}),
+                    fmp_get(client, "ratios-ttm", {"symbol": pt}),
+                    fmp_get(client, "profile", {"symbol": pt}),
+                    return_exceptions=False,
+                )
+                return pt, {"key_metrics_ttm": km, "ratios_ttm": rt, "profile": pf}
+
+            peer_results = await asyncio.gather(
+                *[_fetch_peer(pt) for pt in peer_tickers],
+                return_exceptions=True,
+            )
+            for r in peer_results:
+                if isinstance(r, Exception):
+                    log.warning("FMP peer fetch failed: %s", r)
+                    continue
+                pt, blob = r
+                peer_metrics[pt] = blob
+        out["peer_metrics"] = peer_metrics
+
     return out
 
 

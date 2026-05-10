@@ -86,7 +86,8 @@ def _extract_corporate_actions(news_raw: list, press_raw: list) -> str:
 
 
 def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
-                  moat_hypothesis: str, raw: dict | None = None) -> str:
+                  moat_hypothesis: str, raw: dict | None = None,
+                  competition: dict | None = None) -> str:
     # ── News & press releases block ────────────────────────────────────────
     news_raw = listify(raw.get("stock_news")) if raw else []
     press_raw = listify(raw.get("press_releases")) if raw else []
@@ -211,6 +212,15 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         "red_flags": [{"title": f["title"], "severity": f["severity"]} for f in red_flags[:8]],
     }
 
+    if competition:
+        scorecard["competition"] = {
+            "score": competition.get("score"),
+            "max_score": competition.get("max_score"),
+            "verdict": competition.get("verdict"),
+            "components": competition.get("components"),
+            "peers_used": competition.get("peers_used"),
+        }
+
     hypothesis_block = ""
     if moat_hypothesis:
         hypothesis_block = (
@@ -252,7 +262,8 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
 
 
 def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
-               moat_hypothesis: str = "", raw: dict | None = None) -> dict:
+               moat_hypothesis: str = "", raw: dict | None = None,
+               competition: dict | None = None) -> dict:
     """Returns {markdown, model, input_tokens, output_tokens, cost_usd, used_ai}."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return _fallback(snapshot, moat, valuation, moat_hypothesis,
@@ -262,7 +273,8 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
     except ImportError:
         return _fallback(snapshot, moat, valuation, moat_hypothesis, "anthropic SDK not installed.")
 
-    prompt = _build_prompt(snapshot, moat, valuation, red_flags, moat_hypothesis, raw=raw)
+    prompt = _build_prompt(snapshot, moat, valuation, red_flags, moat_hypothesis,
+                           raw=raw, competition=competition)
 
     try:
         client = anthropic.Anthropic()
@@ -299,6 +311,7 @@ def _build_chat_system(report: dict) -> str:
     moat = report.get("moat", {})
     story = report.get("story_moat") or {}
     growth = report.get("growth_moat") or {}
+    competition = report.get("competition") or {}
     val = report.get("valuation", {})
     flags = report.get("red_flags", [])
     ai_md = (report.get("ai") or {}).get("markdown", "")
@@ -333,6 +346,13 @@ def _build_chat_system(report: dict) -> str:
             "verdict": growth.get("verdict"),
             "components": growth.get("components"),
         } if growth and growth.get("triggered") else None,
+        "competition": {
+            "score": competition.get("score"),
+            "max_score": competition.get("max_score"),
+            "verdict": competition.get("verdict"),
+            "components": competition.get("components"),
+            "peers_used": competition.get("peers_used"),
+        } if competition else None,
         "valuation": {
             "verdict": val.get("verdict"),
             "dcf": val.get("dcf"),

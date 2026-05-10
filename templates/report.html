@@ -170,7 +170,8 @@
   <h2>Step 2 — Find the moat</h2>
   <p class="sub">Two views: what the cash flows show (data) vs. what the qualitative evidence shows (story). Disconnect between them is the insight.</p>
 
-  <div class="moat-panes{% if report.growth_moat and report.growth_moat.triggered %} three-col{% endif %}">
+  {% set _has_growth = report.growth_moat and report.growth_moat.triggered %}
+  <div class="moat-panes {% if _has_growth %}four-col{% else %}three-col{% endif %}">
     <div class="moat-pane">
       <div class="moat-pane-head">
         <span class="pane-label">Data fingerprint</span>
@@ -250,6 +251,35 @@
           </tbody>
         </table>
       </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if report.competition %}
+    <div class="moat-pane competition-pane">
+      <div class="moat-pane-head">
+        <span class="pane-label">Competition strength</span>
+        <span class="big-score">{{ report.competition.score }}/{{ report.competition.max_score }}</span>
+        <strong>{{ report.competition.verdict }}</strong>
+      </div>
+      <p class="hint">Hohn / Buffett "fortress" lens — competitive pressure facing the moat. Higher = stronger barriers, lower competition risk.{% if report.competition.peers_used %} Peers: {{ report.competition.peers_used | join(', ') }}.{% endif %}</p>
+      {% if report.competition.components %}
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Component</th><th>Score</th><th>Detail</th></tr></thead>
+          <tbody>
+            {% for key, c in report.competition.components.items() %}
+            <tr>
+              <th>{{ key.replace('_', ' ').title() }}</th>
+              <td class="qval {{ score_class(c.points, c.max) }}">{{ c.points }}/{{ c.max }}</td>
+              <td>{{ c.note }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="hint">No competitive data available.</p>
       {% endif %}
     </div>
     {% endif %}

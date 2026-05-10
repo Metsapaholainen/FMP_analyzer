@@ -101,9 +101,14 @@ tr.flag-depressed_vs_history td, tr.flag-depressed_vs_history th { background: r
 @media (min-width: 800px) {
   .moat-panes { grid-template-columns: 1fr 1fr; }
   .moat-panes.three-col { grid-template-columns: 1fr 1fr; }
+  .moat-panes.four-col { grid-template-columns: 1fr 1fr; }
 }
 @media (min-width: 1200px) {
   .moat-panes.three-col { grid-template-columns: 1fr 1fr 1fr; }
+  .moat-panes.four-col { grid-template-columns: 1fr 1fr; }
+}
+@media (min-width: 1500px) {
+  .moat-panes.four-col { grid-template-columns: 1fr 1fr 1fr 1fr; }
 }
 .moat-pane {
   background: var(--card-2);
@@ -116,6 +121,12 @@ tr.flag-depressed_vs_history td, tr.flag-depressed_vs_history th { background: r
 }
 .moat-pane.growth-pane .pane-label {
   color: rgba(140, 220, 160, 0.95);
+}
+.moat-pane.competition-pane {
+  border-color: rgba(200, 160, 100, 0.4);
+}
+.moat-pane.competition-pane .pane-label {
+  color: rgba(220, 180, 120, 0.95);
 }
 .moat-pane-head {
   display: flex;
