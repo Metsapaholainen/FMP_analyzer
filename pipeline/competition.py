@@ -75,6 +75,7 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
     km_ttm = first(raw.get("key_metrics_ttm"))
     ratios_ttm = first(raw.get("ratios_ttm"))
     raw_peers = raw.get("peer_metrics") or {}
+    private_competitors: list[str] = raw.get("peer_private_competitors") or []
 
     # Filter peers to same industry first, then same sector — FMP's peer endpoint
     # returns market-cap neighbors (often chips, hardware, consulting) that have
@@ -186,6 +187,10 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
         if low_coverage:
             notes_a.append(f"low peer coverage ({n_peer_data} peers)")
 
+        if private_competitors:
+            private_str = ", ".join(private_competitors)
+            notes_a.insert(0, f"Primary competitors ({private_str}) are private — using public proxies")
+
         score += po_pts; max_possible += peer_max
         components["peer_outperformance"] = {
             "points": round(po_pts, 1), "max": round(peer_max, 2),
@@ -193,9 +198,11 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
         }
     elif peer_metrics:
         # Peers fetched but no usable financials
+        priv_note = (f"Primary competitors ({', '.join(private_competitors)}) are private — "
+                     f"using public proxies; " if private_competitors else "")
         components["peer_outperformance"] = {
             "points": 0.0, "max": 6.0,
-            "note": f"peer cohort returned but no comparable ROIC/GM data ({len(peer_metrics)} peers)",
+            "note": priv_note + f"no comparable ROIC/GM data from {len(peer_metrics)} proxy peers",
         }
         max_possible += 6.0
 

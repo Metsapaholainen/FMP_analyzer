@@ -22,40 +22,66 @@ def _key() -> str:
 
 
 def _ai_competitor_tickers(ticker: str, name: str, description: str,
-                            sector: str, industry: str) -> list[str]:
-    """Use Claude Haiku to return real publicly traded business competitors."""
+                            sector: str, industry: str) -> dict:
+    """Use Claude Haiku to identify real competitors (including private) and
+    return public proxy tickers for FMP data fetching.
+
+    Returns dict with keys:
+      public   — list[str] of US-listed tickers to fetch financials for
+      private  — list[str] of private competitor names (for display note)
+    """
+    empty = {"public": [], "private": []}
     try:
         import anthropic
         if not os.environ.get("ANTHROPIC_API_KEY"):
-            return []
+            return empty
         ac = anthropic.Anthropic()
         msg = ac.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=100,
+            max_tokens=150,
             temperature=0,
             system=(
-                "You are a financial analyst. When asked for competitors, return only companies "
-                "that sell the SAME TYPE of product or service to the SAME customer segments. "
-                "Never include companies from unrelated industries (semiconductors, hardware, "
-                "streaming, telecom, retail) unless they directly sell the same product. "
-                "Reply with ONLY comma-separated ticker symbols, nothing else."
+                "You are a financial analyst identifying direct product competitors. "
+                "Return EXACTLY 2 lines, no other text:\n"
+                "LINE 1 — All real direct competitors (same product, same customers). "
+                "Mark private companies with '(private)'. Comma-separated names.\n"
+                "LINE 2 — Only publicly US-listed ticker symbols for the same or "
+                "closest competing products. Comma-separated tickers only.\n"
+                "Never include unrelated industries (semiconductors, hardware, "
+                "telecom, retail, streaming) unless they directly sell the same product."
             ),
             messages=[{"role": "user", "content": (
-                f"Ticker: {ticker} | Company: {name}\n"
+                f"Company: {ticker} ({name})\n"
                 f"Industry: {industry} | Sector: {sector}\n"
                 f"What it sells: {description[:400]}\n\n"
-                f"List 5-7 publicly traded direct product competitors — companies a customer "
-                f"would buy from INSTEAD of {name}. US-listed preferred. "
-                f"Tickers only, comma-separated."
+                f"List its direct product competitors using the 2-line format."
             )}],
         )
-        text = "".join(b.text for b in msg.content if hasattr(b, "text"))
-        tickers = [tok.strip().upper() for tok in text.split(",") if tok.strip()]
-        return [tok for tok in tickers
-                if tok.replace(".", "").isalnum() and 1 <= len(tok) <= 5 and tok != ticker.upper()][:7]
+        text = "".join(b.text for b in msg.content if hasattr(b, "text")).strip()
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        if len(lines) < 2:
+            return empty
+
+        # Line 1: extract private competitor names
+        private: list[str] = []
+        for part in lines[0].split(","):
+            part = part.strip()
+            if "(private)" in part.lower():
+                name_only = part.lower().replace("(private)", "").strip().title()
+                if name_only:
+                    private.append(name_only)
+
+        # Line 2: extract public tickers
+        public: list[str] = []
+        for tok in lines[1].split(","):
+            tok = tok.strip().upper()
+            if tok.replace(".", "").isalnum() and 1 <= len(tok) <= 5 and tok != ticker.upper():
+                public.append(tok)
+
+        return {"public": public[:7], "private": private}
     except Exception as e:
         log.warning("AI competitor lookup failed: %s", e)
-        return []
+        return empty
 
 
 async def fmp_get(
@@ -155,9 +181,11 @@ async def fetch_all(ticker: str) -> dict:
         sector_val   = profile_data.get("sector") or ""
         industry_val = profile_data.get("industry") or ""
 
-        peer_tickers: list[str] = await asyncio.to_thread(
+        ai_result: dict = await asyncio.to_thread(
             _ai_competitor_tickers, t, company_name, description, sector_val, industry_val
         )
+        peer_tickers: list[str] = ai_result.get("public", [])
+        out["peer_private_competitors"] = ai_result.get("private", [])
 
         if not peer_tickers:
             # Fallback: FMP stock-peers (better than nothing)
