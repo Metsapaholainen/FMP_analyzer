@@ -17,13 +17,13 @@
 {% set ai = report.ai %}
 
 {% macro pct(x) -%}
-  {%- if x is none -%}—{%- else -%}{{ "%.2f"|format(x*100) }}%{%- endif -%}
+  {%- if x is none or x is undefined -%}—{%- else -%}{{ "%.2f"|format(x*100) }}%{%- endif -%}
 {%- endmacro %}
 {% macro num(x, dp=2) -%}
-  {%- if x is none -%}—{%- else -%}{{ "{:,.{}f}".format(x, dp) }}{%- endif -%}
+  {%- if x is none or x is undefined -%}—{%- else -%}{{ "{:,.{}f}".format(x, dp) }}{%- endif -%}
 {%- endmacro %}
 {% macro big(x) -%}
-  {%- if x is none -%}—
+  {%- if x is none or x is undefined -%}—
   {%- elif x|abs >= 1e12 -%}{{ "%.2fT"|format(x/1e12) }}
   {%- elif x|abs >= 1e9 -%}{{ "%.2fB"|format(x/1e9) }}
   {%- elif x|abs >= 1e6 -%}{{ "%.2fM"|format(x/1e6) }}
