@@ -23,6 +23,18 @@ SECTOR_BUCKETS = {
     "Real Estate": "reit",
 }
 
+# Industry-level overrides — checked before sector bucket so hardware+IP companies
+# (Nokia, Ericsson, Qualcomm) aren't penalised by pure-software thresholds.
+INDUSTRY_BUCKETS = {
+    "Communication Equipment": "telecom_equipment",
+    "Telecom Equipment": "telecom_equipment",
+    "Telecommunications Equipment": "telecom_equipment",
+    "Semiconductors": "semiconductors",
+    "Semiconductor Equipment": "semiconductors",
+    "Electronic Components": "telecom_equipment",
+    "Scientific & Technical Instruments": "industrials",
+}
+
 LENSES = {
     "technology": {
         "label": "Technology / Software",
@@ -142,6 +154,50 @@ LENSES = {
         ],
         "quant_thresholds": {},
     },
+    "telecom_equipment": {
+        "label": "Telecom / Network Equipment & IP Licensing",
+        "primary_moats": ["intangible assets (patents/SEPs)", "switching costs", "scale"],
+        "checklist": [
+            "Standards-essential patents (SEPs): does the company hold 5G/LTE/WiFi SEPs "
+            "that generate royalty licensing revenue at near-100% gross margin?",
+            "Switching costs: telecom operators sign multi-year deployment contracts and "
+            "recertifying new kit requires field crews + software integration — high friction.",
+            "R&D intensity >15% of revenue signals sustained IP investment and patent "
+            "portfolio renewal (critical as each generation of standards resets SEP value).",
+            "Aftermarket services and network managed services as % of revenue — "
+            "captive install-base economics similar to industrials aftermarket.",
+            "Market position in 5G RAN and optical networking: secular infrastructure "
+            "cycle lasts 8–12 years per generation.",
+            "Defense/government contracts add revenue durability and switching cost layer.",
+            "Note: gross margins 35–50% are normal for hardware+IP blend; don't penalise "
+            "vs. pure-software thresholds. Judge stability, not absolute level.",
+        ],
+        "quant_thresholds": {
+            "gross_margin_min": 0.33,
+            "fcf_margin_min": 0.07,
+            "roic_min": 0.09,
+            "rd_to_revenue_min": 0.12,
+        },
+    },
+    "semiconductors": {
+        "label": "Semiconductors / Chip Design",
+        "primary_moats": ["intangible assets (IP/process)", "switching costs", "scale"],
+        "checklist": [
+            "IP moat: proprietary ISA, process node, or design tools that competitors "
+            "cannot easily replicate (ARM, NVIDIA CUDA, ASML EUV)?",
+            "Customer lock-in: once a chip is designed into a product, replacement takes "
+            "2–3 years — high switching cost at the design-win stage.",
+            "Fabless model: gross margins >50% signal strong IP content vs. commodity silicon.",
+            "R&D/revenue >15%: sustaining process and design leadership requires relentless investment.",
+            "End-market diversity: consumer vs. data center vs. automotive vs. industrial.",
+        ],
+        "quant_thresholds": {
+            "gross_margin_min": 0.45,
+            "fcf_margin_min": 0.10,
+            "roic_min": 0.12,
+            "rd_to_revenue_min": 0.15,
+        },
+    },
     "other": {
         "label": "Other / Diversified",
         "primary_moats": ["mixed"],
@@ -156,10 +212,15 @@ LENSES = {
 }
 
 
-def lens_for(sector: str | None) -> dict:
-    if not sector:
-        return LENSES["other"] | {"bucket": "other"}
-    bucket = SECTOR_BUCKETS.get(sector, "other")
+def lens_for(sector: str | None, industry: str | None = None) -> dict:
+    # Industry-level override takes priority — hardware+IP companies must not be
+    # judged against pure-software thresholds just because their FMP sector = "Technology".
+    if industry and industry in INDUSTRY_BUCKETS:
+        bucket = INDUSTRY_BUCKETS[industry]
+    elif sector:
+        bucket = SECTOR_BUCKETS.get(sector, "other")
+    else:
+        bucket = "other"
     out = dict(LENSES[bucket])
     out["bucket"] = bucket
     return out

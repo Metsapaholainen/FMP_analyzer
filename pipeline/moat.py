@@ -33,7 +33,8 @@ def _years_above(series: list[float], threshold: float) -> int:
 
 def build_moat(raw: dict, fundamentals: dict) -> dict:
     sector = fundamentals["snapshot"].get("sector")
-    lens = lens_for(sector)
+    industry = fundamentals["snapshot"].get("industry")
+    lens = lens_for(sector, industry)
     thresholds = lens.get("quant_thresholds", {})
 
     income_a = listify(raw.get("income_annual"))
@@ -122,19 +123,60 @@ def build_moat(raw: dict, fundamentals: dict) -> dict:
         "net_buybacks_5y": round(net_buybacks, 0),
     }
 
+    # R&D intensity: sustained IP investment creates patent portfolios, switching costs,
+    # and process advantages that show up as moat years later (10 pts bonus).
+    # Only scored when R&D data is available; not penalised when absent (e.g. consumer brands).
+    rd_threshold = thresholds.get("rd_to_revenue_min", 0.0)
+    rd_hist = []
+    for stmt in income_a:
+        rev = stmt.get("revenue") or 0
+        rd = stmt.get("researchAndDevelopmentExpenses") or 0
+        if rev > 0 and rd > 0:
+            rd_hist.append(rd / rev)
+
+    rd_pts = 0.0
+    rd_ratio_recent = rd_hist[0] if rd_hist else None
+    yrs_rd = 0
+    if rd_hist:
+        effective_min = max(rd_threshold, 0.08)  # at least 8% for any credit
+        yrs_rd = _years_above(rd_hist, effective_min)
+        if yrs_rd >= 5:
+            rd_pts = 10.0
+        elif yrs_rd >= 3:
+            rd_pts = 7.0
+        elif yrs_rd >= 1:
+            rd_pts = 3.0
+
+    if rd_pts > 0 or rd_hist:
+        score += rd_pts
+        components["rd_intensity"] = {
+            "points": round(rd_pts, 1),
+            "max": 10,
+            "years_above_threshold": yrs_rd,
+            "threshold": max(rd_threshold, 0.08),
+            "current_rd_ratio": round(rd_ratio_recent, 3) if rd_ratio_recent is not None else None,
+        }
+        max_score = 110
+    else:
+        max_score = 100
+
     score = round(score, 1)
 
-    if score >= 70:
+    # Verdict scaled so Wide/Narrow thresholds mean the same thing regardless of
+    # whether the R&D component is active.
+    pct = score / max_score
+    if pct >= 0.636:   # ≈70/110 or 70/100
         verdict = "Wide moat (likely)"
-    elif score >= 45:
+    elif pct >= 0.409: # ≈45/110 or 45/100
         verdict = "Narrow moat"
-    elif score >= 25:
+    elif pct >= 0.227: # ≈25/110 or 25/100
         verdict = "Limited / questionable moat"
     else:
         verdict = "No moat detected"
 
     return {
         "score": score,
+        "max_score": max_score,
         "verdict": verdict,
         "components": components,
         "sector_lens": lens,
