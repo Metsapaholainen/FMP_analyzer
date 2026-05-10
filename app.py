@@ -227,3 +227,15 @@ async def api_analyze(ticker: str, password: str):
 @app.get("/healthz")
 async def healthz():
     return {"ok": True, "cache_entries": len(list(CACHE_DIR.glob("*.json")))}
+
+
+@app.post("/admin/clear-cache")
+async def clear_cache(password: str = Form(...)):
+    if not _check_password(password):
+        raise HTTPException(401, "Invalid password.")
+    deleted = 0
+    for f in CACHE_DIR.glob("*.json"):
+        f.unlink()
+        deleted += 1
+    log.info("Cache cleared: %d files deleted", deleted)
+    return {"ok": True, "deleted": deleted}
