@@ -21,6 +21,35 @@ def _key() -> str:
     return k
 
 
+def _ai_competitor_tickers(ticker: str, name: str, description: str,
+                            sector: str, industry: str) -> list[str]:
+    """Use Claude Haiku to return real publicly traded business competitors."""
+    try:
+        import anthropic
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            return []
+        ac = anthropic.Anthropic()
+        msg = ac.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=80,
+            temperature=0,
+            messages=[{"role": "user", "content": (
+                f"List 5-7 publicly traded direct business competitors to {ticker} "
+                f"({name}), a {sector} / {industry} company. "
+                f"Description: {description[:300]}. "
+                f"US-listed stocks only. Return ONLY ticker symbols, comma-separated, "
+                f"no explanation, no extra text."
+            )}],
+        )
+        text = "".join(b.text for b in msg.content if hasattr(b, "text"))
+        tickers = [tok.strip().upper() for tok in text.split(",") if tok.strip()]
+        return [tok for tok in tickers
+                if tok.replace(".", "").isalnum() and 1 <= len(tok) <= 5 and tok != ticker.upper()][:7]
+    except Exception as e:
+        log.warning("AI competitor lookup failed: %s", e)
+        return []
+
+
 async def fmp_get(
     client: httpx.AsyncClient,
     endpoint: str,
@@ -110,17 +139,28 @@ async def fetch_all(ticker: str) -> dict:
                 out[k] = v
 
         # Second-stage parallel fetch: peer financials for competition scoring.
-        # Cap at 5 peers to bound cost (~15 extra calls) — runs in parallel so ~1s wall.
-        peer_tickers: list[str] = []
-        peers_raw = out.get("peers")
-        if isinstance(peers_raw, list) and peers_raw:
-            # FMP returns either [{"symbol":..., "peersList":[...]}] or a flat list of {"symbol":...}
-            head = peers_raw[0] if isinstance(peers_raw[0], dict) else {}
-            if "peersList" in head:
-                peer_tickers = [p for p in (head.get("peersList") or []) if isinstance(p, str)][:5]
-            else:
-                peer_tickers = [p.get("symbol") for p in peers_raw
-                                if isinstance(p, dict) and p.get("symbol") and p.get("symbol") != t][:5]
+        # Use AI-generated competitor list (much more relevant than FMP's market-cap
+        # neighbors). Falls back to FMP stock-peers if AI is unavailable.
+        profile_data = first(out.get("profile"))
+        company_name = profile_data.get("companyName") or t
+        description  = (profile_data.get("description") or "")[:500]
+        sector_val   = profile_data.get("sector") or ""
+        industry_val = profile_data.get("industry") or ""
+
+        peer_tickers: list[str] = await asyncio.to_thread(
+            _ai_competitor_tickers, t, company_name, description, sector_val, industry_val
+        )
+
+        if not peer_tickers:
+            # Fallback: FMP stock-peers (better than nothing)
+            peers_raw = out.get("peers")
+            if isinstance(peers_raw, list) and peers_raw:
+                head = peers_raw[0] if isinstance(peers_raw[0], dict) else {}
+                if "peersList" in head:
+                    peer_tickers = [p for p in (head.get("peersList") or []) if isinstance(p, str)][:6]
+                else:
+                    peer_tickers = [p.get("symbol") for p in peers_raw
+                                    if isinstance(p, dict) and p.get("symbol") and p.get("symbol") != t][:6]
 
         peer_metrics: dict[str, dict] = {}
         if peer_tickers:
