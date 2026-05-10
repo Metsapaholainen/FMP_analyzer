@@ -37,7 +37,7 @@ def _ai_competitor_tickers(ticker: str, name: str, description: str,
             return empty
         ac = anthropic.Anthropic()
         msg = ac.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=150,
             temperature=0,
             system=(
