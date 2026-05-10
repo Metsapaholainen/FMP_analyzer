@@ -177,6 +177,33 @@ def build_fundamentals(raw: dict) -> dict:
         piotroski_score = int(raw_p) if raw_p is not None else None
         altman_z_score = _safe(fs.get("altmanZScore"))
 
+    # Segment economics — isolate the largest segment and any IP/licensing segments.
+    # FMP returns flat structure: list of {date, symbol, period, SegName1: rev1, ...}
+    seg_data = listify(raw.get("segments_product"))
+    top_segment = None
+    licensing_segment_pct = None
+    if seg_data:
+        latest = seg_data[0]
+        # FMP wraps segments in a nested 'data' dict on /stable; legacy responses are flat.
+        seg_source = latest.get("data") if isinstance(latest.get("data"), dict) else latest
+        seg_pairs = [(k, _safe(v)) for k, v in seg_source.items()
+                     if k not in ("date", "symbol", "period", "reportedCurrency", "fiscalYear", "cik", "data")
+                     and _safe(v) is not None and _safe(v) > 0]
+        if seg_pairs:
+            total_seg_rev = sum(v for _, v in seg_pairs)
+            seg_pairs.sort(key=lambda x: x[1], reverse=True)
+            top_name, top_rev = seg_pairs[0]
+            top_segment = {
+                "name": top_name,
+                "revenue": top_rev,
+                "pct_of_total": round(top_rev / total_seg_rev, 4) if total_seg_rev > 0 else None,
+            }
+            ip_keywords = ("technolog", "licens", "royalt", "patent", "intellectual")
+            ip_segs = [(k, v) for k, v in seg_pairs
+                       if any(kw in k.lower() for kw in ip_keywords)]
+            if ip_segs and total_seg_rev > 0:
+                licensing_segment_pct = round(sum(v for _, v in ip_segs) / total_seg_rev, 4)
+
     # Pseudo-TTM dict for downstream modules (red_flags etc.)
     income_ttm: dict = {
         "revenue": revenue_ttm, "netIncome": net_income_ttm,
@@ -319,6 +346,8 @@ def build_fundamentals(raw: dict) -> dict:
         "owner_earnings_ttm": owner_earnings_ttm,
         "piotroski_score": piotroski_score,
         "altman_z_score": altman_z_score,
+        "top_segment": top_segment,
+        "licensing_segment_pct": licensing_segment_pct,
     }
 
     # Write computed TTM dicts back into raw so red_flags / valuation can reuse them

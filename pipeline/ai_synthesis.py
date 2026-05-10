@@ -50,6 +50,50 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         "ANALYST CONSENSUS:\n" + "\n".join(f"  {l}" for l in analyst_lines) + "\n\n"
     ) if analyst_lines else ""
 
+    # Segment economics block
+    top_seg = snapshot.get("top_segment")
+    licensing_pct = snapshot.get("licensing_segment_pct")
+    seg_lines = []
+    if top_seg:
+        pct = (top_seg.get("pct_of_total") or 0) * 100
+        seg_lines.append(f"Top segment: {top_seg['name']} = {pct:.0f}% of revenue")
+    if licensing_pct is not None:
+        seg_lines.append(f"IP/licensing segments combined: {licensing_pct*100:.1f}% of revenue")
+    seg_block = (
+        "SEGMENT ECONOMICS:\n" + "\n".join(f"  {l}" for l in seg_lines) + "\n\n"
+    ) if seg_lines else ""
+
+    # SEC filings block — list 2 most recent annual filings
+    sec = listify(raw.get("sec_filings")) if raw else []
+    annual_f = [f for f in sec
+                if (f.get("formType") or f.get("type") or "").upper() in ("10-K", "20-F", "10-K/A", "20-F/A")][:2]
+    sec_block = ""
+    if annual_f:
+        sec_lines = [
+            f"  - {f.get('formType') or f.get('type')} filed {(f.get('filingDate') or f.get('fillingDate') or '')[:10]}"
+            for f in annual_f
+        ]
+        sec_block = (
+            "RECENT ANNUAL FILINGS (treat as authoritative on patents, customer concentration, risk factors):\n"
+            + "\n".join(sec_lines) + "\n\n"
+        )
+
+    # Smart money block
+    insiders = listify(raw.get("insider_trades")) if raw else []
+    sm_lines = []
+    if insiders:
+        recent = insiders[:10]
+        n_buys = sum(1 for t in recent
+                     if "BUY" in (t.get("transactionType") or "").upper()
+                     or "P-PURCHASE" in (t.get("transactionType") or "").upper())
+        n_sells = sum(1 for t in recent
+                      if "SELL" in (t.get("transactionType") or "").upper()
+                      or "S-SALE" in (t.get("transactionType") or "").upper())
+        sm_lines.append(f"Recent insider trades (last 10): {n_buys} buys, {n_sells} sells")
+    sm_block = (
+        "SMART-MONEY SIGNALS:\n" + "\n".join(f"  {l}" for l in sm_lines) + "\n\n"
+    ) if sm_lines else ""
+
     scorecard = {
         "ticker": snapshot.get("ticker"),
         "name": snapshot.get("name"),
@@ -89,7 +133,7 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         "stability). If the data doesn't support one, say so clearly. Avoid false positives. "
         "But also: if the data is early-stage or limited, note what additional evidence would "
         "confirm or deny the moat rather than defaulting to 'no moat'.\n\n"
-        f"{news_block}{analyst_block}"
+        f"{news_block}{analyst_block}{seg_block}{sec_block}{sm_block}"
         f"SCORECARD:\n```json\n{json.dumps(scorecard, indent=2, default=str)}\n```"
         f"{hypothesis_block}\n\n"
         "OUTPUT FORMAT (markdown, total ~450 words max):\n\n"

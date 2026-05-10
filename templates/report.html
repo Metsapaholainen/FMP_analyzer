@@ -158,34 +158,67 @@
   {% endif %}
 </section>
 
-<!-- STEP 2 — MOAT -->
+<!-- STEP 2 — MOAT (two panes: data fingerprint + story) -->
 <section class="card">
   <h2>Step 2 — Find the moat</h2>
-  <div class="moat-verdict">
-    <span class="big-score">{{ moat.score }}/{{ moat.max_score or 100 }}</span>
-    <strong>{{ moat.verdict }}</strong>
-  </div>
+  <p class="sub">Two views: what the cash flows show (data) vs. what the qualitative evidence shows (story). Disconnect between them is the insight.</p>
 
-  <h3>Quantitative fingerprint</h3>
-  <div class="tablewrap">
-  <table>
-    <thead><tr><th>Component</th><th>Score</th><th>Detail</th></tr></thead>
-    <tbody>
-      {% for key, c in moat.components.items() %}
-      <tr>
-        <th>{{ key.replace('_', ' ').title() }}</th>
-        <td>{{ c.points }}/{{ c.max }}</td>
-        <td>
-          {% if c.current_rd_ratio is defined %}R&amp;D/rev ≥{{ "%.0f"|format(c.threshold*100) }}% threshold, {{ c.years_above_threshold }} yrs above, current {{ pct(c.current_rd_ratio) }}
-          {% elif c.threshold is defined %}≥{{ "%.0f"|format(c.threshold*100) }}% threshold,
-            {{ c.years_above_threshold }} of {{ moat.history_years.roic if 'roic' in key else moat.history_years.fcf_margin }} yrs above{% endif %}
-          {% if c.coefficient_of_variation is defined and c.coefficient_of_variation is not none %}CV={{ c.coefficient_of_variation }}, current GM {{ pct(c.current_gross_margin) }}{% endif %}
-          {% if c.gross_buybacks_5y is defined %}5Y gross ${{ big(c.gross_buybacks_5y) }} − SBC ${{ big(c.sbc_5y) }} = net ${{ big(c.net_buybacks_5y) }}{% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="moat-panes">
+    <div class="moat-pane">
+      <div class="moat-pane-head">
+        <span class="pane-label">Data fingerprint</span>
+        <span class="big-score">{{ moat.score }}/{{ moat.max_score or 100 }}</span>
+        <strong>{{ moat.verdict }}</strong>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Component</th><th>Score</th><th>Detail</th></tr></thead>
+          <tbody>
+            {% for key, c in moat.components.items() %}
+            <tr>
+              <th>{{ key.replace('_', ' ').title() }}</th>
+              <td>{{ c.points }}/{{ c.max }}</td>
+              <td>
+                {% if c.current_rd_ratio is defined %}R&amp;D/rev ≥{{ "%.0f"|format(c.threshold*100) }}% threshold, {{ c.years_above_threshold }} yrs above, current {{ pct(c.current_rd_ratio) }}
+                {% elif c.threshold is defined %}≥{{ "%.0f"|format(c.threshold*100) }}% threshold,
+                  {{ c.years_above_threshold }} of {{ moat.history_years.roic if 'roic' in key else moat.history_years.fcf_margin }} yrs above{% endif %}
+                {% if c.coefficient_of_variation is defined and c.coefficient_of_variation is not none %}CV={{ c.coefficient_of_variation }}, current GM {{ pct(c.current_gross_margin) }}{% endif %}
+                {% if c.gross_buybacks_5y is defined %}5Y gross ${{ big(c.gross_buybacks_5y) }} − SBC ${{ big(c.sbc_5y) }} = net ${{ big(c.net_buybacks_5y) }}{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% if report.story_moat %}
+    <div class="moat-pane">
+      <div class="moat-pane-head">
+        <span class="pane-label">Story moat</span>
+        <span class="big-score">{{ report.story_moat.score }}/{{ report.story_moat.max_score }}</span>
+        <strong>{{ report.story_moat.verdict }}</strong>
+      </div>
+      {% if report.story_moat.components %}
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Component</th><th>Score</th><th>Detail</th></tr></thead>
+          <tbody>
+            {% for key, c in report.story_moat.components.items() %}
+            <tr>
+              <th>{{ key.replace('_', ' ').title() }}</th>
+              <td>{{ c.points }}/{{ c.max }}</td>
+              <td>{{ c.note }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="hint">No qualitative signals available from FMP for this ticker.</p>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 
   <h3>Sector lens — {{ moat.sector_lens.label }}</h3>
@@ -246,6 +279,11 @@
     <div><span>Buy / Hold / Sell</span><strong>{{ v.analyst.buy }} / {{ v.analyst.hold or '—' }} / {{ v.analyst.sell or '—' }}</strong></div>
     {% endif %}
   </div>
+  {% endif %}
+
+  {% if report.story_moat and report.story_moat.components.smart_money %}
+  <h3>Smart money</h3>
+  <p class="sub">{{ report.story_moat.components.smart_money.note }}</p>
   {% endif %}
 </section>
 

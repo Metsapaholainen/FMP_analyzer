@@ -62,7 +62,10 @@ async def fmp_get(
 async def fetch_all(ticker: str) -> dict:
     """Pull every endpoint we need for a single-ticker analysis in parallel.
     Returns dict keyed by logical name; values may be None/[] on failure (callers must handle)."""
+    import datetime as _dt
     t = ticker.upper().strip()
+    sec_to = _dt.date.today().isoformat()
+    sec_from = (_dt.date.today() - _dt.timedelta(days=1100)).isoformat()  # ~3y window
 
     async with httpx.AsyncClient() as client:
         tasks = {
@@ -85,6 +88,13 @@ async def fetch_all(ticker: str) -> dict:
             "stock_news":         fmp_get(client, "stock-news", {"tickers": t, "limit": 8}),
             "price_targets":      fmp_get(client, "price-target-consensus", {"symbol": t}),
             "analyst_grades":     fmp_get(client, "grades-summary", {"symbol": t}),
+            "segments_product":   fmp_get(client, "revenue-product-segmentation", {"symbol": t, "structure": "flat"}),
+            "segments_geo":       fmp_get(client, "revenue-geographic-segmentation", {"symbol": t, "structure": "flat"}),
+            # limit=100 because heavy filers (AAPL etc) file dozens of Form 4s — need headroom to find 10-K/20-F
+            "sec_filings":        fmp_get(client, "sec-filings-search/symbol",
+                                          {"symbol": t, "from": sec_from, "to": sec_to, "limit": 100}),
+            "insider_trades":     fmp_get(client, "insider-trading/search", {"symbol": t, "limit": 50}),
+            # institutional ownership endpoints require paid FMP tier — skipped
         }
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 

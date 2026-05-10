@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from pipeline.fmp_client import fetch_all
 from pipeline.fundamentals import build_fundamentals
-from pipeline.moat import build_moat
+from pipeline.moat import build_moat, build_story_moat
 from pipeline.valuation import build_valuation
 from pipeline.red_flags import detect_red_flags
 from pipeline.ai_synthesis import synthesize
@@ -141,6 +141,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
         raise HTTPException(404, f"No FMP data for ticker '{ticker}'.")
 
     moat = build_moat(raw, fundamentals)
+    story_moat = build_story_moat(raw, fundamentals, moat)
     valuation = build_valuation(raw, fundamentals)
     red_flags = detect_red_flags(raw, fundamentals)
     ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
@@ -154,6 +155,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
         "moat_hypothesis": moat_hypothesis.strip(),
         "fundamentals": fundamentals,
         "moat": moat,
+        "story_moat": story_moat,
         "valuation": valuation,
         "red_flags": red_flags,
         "ai": ai,

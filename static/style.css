@@ -92,6 +92,38 @@ tr.flag-depressed_vs_history td, tr.flag-depressed_vs_history th { background: r
 }
 .big-score { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
 
+.moat-panes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin: 8px 0 18px;
+}
+@media (min-width: 800px) {
+  .moat-panes { grid-template-columns: 1fr 1fr; }
+}
+.moat-pane {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.moat-pane-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.pane-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--mute);
+}
+.moat-pane .big-score { font-size: 1.4rem; }
+.moat-pane table { min-width: 0; font-size: 0.86rem; }
+
 .checklist { padding-left: 1.1em; }
 .checklist li { margin-bottom: 4px; }
 
