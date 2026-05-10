@@ -196,6 +196,128 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
     }
 
 
+def _build_chat_system(report: dict) -> str:
+    """Compact system prompt for chat follow-ups. Includes the scorecards and AI
+    summary the user already sees, so the model can answer in-context without
+    re-fetching FMP data. Marked for prompt caching at the call site."""
+    snap = report.get("fundamentals", {}).get("snapshot", {})
+    moat = report.get("moat", {})
+    story = report.get("story_moat") or {}
+    growth = report.get("growth_moat") or {}
+    val = report.get("valuation", {})
+    flags = report.get("red_flags", [])
+    ai_md = (report.get("ai") or {}).get("markdown", "")
+
+    scorecard = {
+        "ticker": snap.get("ticker"),
+        "name": snap.get("name"),
+        "sector": snap.get("sector"),
+        "industry": snap.get("industry"),
+        "price": snap.get("price"),
+        "market_cap": snap.get("market_cap"),
+        "fcf_ttm": snap.get("fcf_ttm"),
+        "revenue_ttm": snap.get("revenue_ttm"),
+        "piotroski_score": snap.get("piotroski_score"),
+        "altman_z_score": snap.get("altman_z_score"),
+        "data_moat": {
+            "score": moat.get("score"),
+            "max_score": moat.get("max_score"),
+            "verdict": moat.get("verdict"),
+            "components": moat.get("components"),
+            "sector_lens": (moat.get("sector_lens") or {}).get("label"),
+        },
+        "story_moat": {
+            "score": story.get("score"),
+            "max_score": story.get("max_score"),
+            "verdict": story.get("verdict"),
+            "components": story.get("components"),
+        } if story else None,
+        "growth_moat": {
+            "score": growth.get("score"),
+            "max_score": growth.get("max_score"),
+            "verdict": growth.get("verdict"),
+            "components": growth.get("components"),
+        } if growth and growth.get("triggered") else None,
+        "valuation": {
+            "verdict": val.get("verdict"),
+            "dcf": val.get("dcf"),
+            "cash_return": val.get("cash_return"),
+            "analyst": val.get("analyst"),
+        },
+        "red_flags": [{"title": f["title"], "severity": f["severity"]} for f in flags[:8]],
+    }
+
+    return (
+        "You are a strict, evidence-driven equity analyst answering follow-up "
+        "questions about a report the user is currently reading. Answer ONLY from "
+        "the data in the scorecard and prior AI summary below. If a question requires "
+        "data not present (live news, real-time prices, transcripts), say so clearly "
+        "and suggest where the user could find it. Keep answers concise — 2-4 short "
+        "paragraphs or a tight bullet list. Be direct: agree, disagree, or call out "
+        "uncertainty. Never invent numbers.\n\n"
+        f"SCORECARD:\n```json\n{json.dumps(scorecard, indent=2, default=str)}\n```\n\n"
+        f"PRIOR AI SUMMARY (already shown to the user):\n{ai_md}\n"
+    )
+
+
+def chat_followup(report: dict, message: str, history: list[dict],
+                  use_sonnet: bool = False) -> dict:
+    """Stateless follow-up Q on a rendered report. Uses prompt caching so the
+    report context stays cheap across turns within a 5-minute window."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return {"response": "AI unavailable: ANTHROPIC_API_KEY not set on the server.",
+                "model": None, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+    try:
+        import anthropic
+    except ImportError:
+        return {"response": "AI unavailable: anthropic SDK not installed.",
+                "model": None, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+
+    model = "claude-sonnet-4-6" if use_sonnet else "claude-haiku-4-5-20251001"
+    system_block = _build_chat_system(report)
+
+    # Sanitise history: only role/content strings, drop anything else
+    safe_history = []
+    for h in (history or [])[-10:]:
+        role = h.get("role")
+        content = h.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            safe_history.append({"role": role, "content": content[:4000]})
+    messages = [*safe_history, {"role": "user", "content": message[:4000]}]
+
+    try:
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model=model,
+            max_tokens=800,
+            temperature=0.3,
+            system=[{"type": "text", "text": system_block,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=messages,
+        )
+    except Exception as e:
+        log.warning("Chat follow-up failed: %s", e)
+        return {"response": f"AI call failed: {e}", "model": model,
+                "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+
+    text = "".join(b.text for b in msg.content if hasattr(b, "text"))
+    in_rate = 3.0 if use_sonnet else 1.0
+    out_rate = 15.0 if use_sonnet else 5.0
+    in_tok = msg.usage.input_tokens
+    out_tok = msg.usage.output_tokens
+    # Approx cost — Anthropic billing splits cached vs uncached but the SDK's
+    # `usage` field reports the combined input count; this is a slight overestimate
+    # for cached follow-ups, which is fine for a rough cost meter.
+    cost = (in_tok / 1e6) * in_rate + (out_tok / 1e6) * out_rate
+    return {
+        "response": text,
+        "model": model,
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "cost_usd": round(cost, 5),
+    }
+
+
 def _fallback(snapshot, moat, valuation, moat_hypothesis, reason: str) -> dict:
     md = (
         f"## Executive summary\n"

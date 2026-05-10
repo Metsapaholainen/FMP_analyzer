@@ -22,10 +22,10 @@ from fastapi.templating import Jinja2Templates
 
 from pipeline.fmp_client import fetch_all
 from pipeline.fundamentals import build_fundamentals
-from pipeline.moat import build_moat, build_story_moat
+from pipeline.moat import build_moat, build_story_moat, build_growth_moat
 from pipeline.valuation import build_valuation
 from pipeline.red_flags import detect_red_flags
-from pipeline.ai_synthesis import synthesize
+from pipeline.ai_synthesis import synthesize, chat_followup
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -142,6 +142,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
 
     moat = build_moat(raw, fundamentals)
     story_moat = build_story_moat(raw, fundamentals, moat)
+    growth_moat = build_growth_moat(raw, fundamentals, moat)
     valuation = build_valuation(raw, fundamentals)
     red_flags = detect_red_flags(raw, fundamentals)
     ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
@@ -156,6 +157,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
         "fundamentals": fundamentals,
         "moat": moat,
         "story_moat": story_moat,
+        "growth_moat": growth_moat,
         "valuation": valuation,
         "red_flags": red_flags,
         "ai": ai,
@@ -200,6 +202,9 @@ async def analyze(
         report["_from_cache"] = False
         _cache_put(cache_key, report)
 
+    # Surface the hypothesis hash so the chat UI can look up this exact cache entry
+    report["_hyp_hash"] = hyp_hash
+
     return templates.TemplateResponse(
         "report.html",
         {"request": request, "report": report},
@@ -222,6 +227,41 @@ async def api_analyze(ticker: str, password: str):
     report["_from_cache"] = False
     _cache_put(t, report)
     return JSONResponse(report)
+
+
+@app.post("/chat")
+async def chat(
+    ticker: str = Form(...),
+    hypothesis_hash: str = Form(default="nohyp"),
+    message: str = Form(...),
+    history: str = Form(default="[]"),
+    use_sonnet: bool = Form(default=False),
+    password: str = Form(...),
+):
+    """In-context follow-up chat on a previously rendered report. Looks up the
+    cached report by ticker+hypothesis_hash; rejects if no analysis has been run."""
+    if not _check_password(password):
+        raise HTTPException(401, "Invalid password.")
+    t = ticker.strip().upper()
+    if not t or not all(c.isalnum() or c in "-." for c in t) or len(t) > 10:
+        raise HTTPException(400, "Invalid ticker.")
+    if not message.strip():
+        raise HTTPException(400, "Empty message.")
+
+    cache_key = f"{t}_{hypothesis_hash}"
+    cached = _cache_get(cache_key)
+    if not cached:
+        raise HTTPException(404, "No cached report for this ticker — run the analysis first.")
+
+    try:
+        history_list = json.loads(history)
+        if not isinstance(history_list, list):
+            history_list = []
+    except (ValueError, TypeError):
+        history_list = []
+
+    result = chat_followup(cached, message.strip(), history_list, use_sonnet=use_sonnet)
+    return JSONResponse(result)
 
 
 @app.get("/healthz")
