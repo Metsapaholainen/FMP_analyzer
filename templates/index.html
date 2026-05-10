@@ -26,6 +26,9 @@
 
     <label for="password">Access password</label>
     <input id="password" name="password" type="password" required placeholder="password">
+    <label class="checkbox-inline" style="margin-top:4px">
+      <input type="checkbox" name="force_refresh" value="1"> Force fresh data (bypass cache)
+    </label>
     <button type="submit">Analyze</button>
     <p class="hint">Hypothesis changes the cache key — a new hypothesis triggers a fresh AI synthesis. Powered by FMP + Claude Haiku 4.5.</p>
   </form>

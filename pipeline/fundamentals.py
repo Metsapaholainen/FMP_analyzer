@@ -257,6 +257,10 @@ def build_fundamentals(raw: dict) -> dict:
                            or _safe(bs_latest.get("totalEquity")))
     # price/market_cap already computed above
 
+    # Pre-compute EPS CAGRs for PEG fallback (growth dict is built later)
+    _eps_cagr_5y = _cagr(eps_hist, 5)
+    _eps_cagr_3y = _cagr(eps_hist, 3)
+
     # Valuation multiples
     metrics["pe"] = _band(
         ratios_ttm.get("priceToEarningsRatioTTM") or km_ttm.get("peRatioTTM") or _safe(quote.get("pe")),
@@ -282,14 +286,17 @@ def build_fundamentals(raw: dict) -> dict:
     metrics["pb"]["quality"] = _quality_tag(
         metrics["pb"]["current"], great=1.5, good=3, bad=7, critical=15, higher_is_better=False)
 
-    metrics["peg"] = _band(
-        (ratios_ttm.get("priceEarningsToGrowthRatioTTM")
-         or ratios_ttm.get("pegRatioTTM")
-         or km_ttm.get("pegRatioTTM")),
-        (_ratio_history(ratios_a, "priceEarningsToGrowthRatio")
-         or _ratio_history(ratios_a, "pegRatio")),
-        higher_is_worse=True,
-    )
+    _peg_ttm = (ratios_ttm.get("priceEarningsToGrowthRatioTTM")
+                or ratios_ttm.get("pegRatioTTM")
+                or km_ttm.get("pegRatioTTM"))
+    if _peg_ttm is None:
+        _pe_cur = metrics["pe"]["current"]
+        _eps_g = _eps_cagr_5y or _eps_cagr_3y
+        if _pe_cur and _eps_g and _eps_g > 0:
+            _peg_ttm = _pe_cur / (_eps_g * 100)
+    _peg_hist = (_ratio_history(ratios_a, "priceEarningsToGrowthRatio")
+                 or _ratio_history(ratios_a, "pegRatio"))
+    metrics["peg"] = _band(_peg_ttm, _peg_hist, higher_is_worse=True)
     metrics["peg"]["quality"] = _quality_tag(
         metrics["peg"]["current"], great=1.0, good=1.5, bad=3.0, critical=5.0, higher_is_better=False)
 
@@ -356,13 +363,15 @@ def build_fundamentals(raw: dict) -> dict:
     metrics["roa"]["quality"] = _quality_tag(
         metrics["roa"]["current"], great=0.10, good=0.05, bad=0.01, critical=-0.01)
 
-    metrics["roic"] = _band(
-        (km_ttm.get("roicTTM")
-         or ratios_ttm.get("returnOnInvestedCapitalTTM")
-         or km_ttm.get("returnOnInvestedCapital")),
-        [r.get("returnOnInvestedCapital") or r.get("roic") for r in km_a
-         if (r.get("returnOnInvestedCapital") or r.get("roic")) is not None],
-    )
+    _roic_ttm = (km_ttm.get("roicTTM")
+                 or ratios_ttm.get("returnOnInvestedCapitalTTM")
+                 or km_ttm.get("returnOnInvestedCapital"))
+    _roic_hist = [r.get("returnOnInvestedCapital") or r.get("roic") for r in km_a
+                  if (r.get("returnOnInvestedCapital") or r.get("roic")) is not None]
+    # Fallback: use most recent annual if TTM endpoint is missing
+    if _roic_ttm is None and _roic_hist:
+        _roic_ttm = _roic_hist[0]
+    metrics["roic"] = _band(_roic_ttm, _roic_hist)
     metrics["roic"]["quality"] = _quality_tag(
         metrics["roic"]["current"], great=0.25, good=0.15, bad=0.05, critical=-0.01)
     metrics["gross_margin"] = _band(

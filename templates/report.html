@@ -30,6 +30,13 @@
   {%- else -%}{{ "%.0f"|format(x) }}{%- endif -%}
 {%- endmacro %}
 
+{% macro score_class(pts, max) -%}
+  {%- if max and max > 0 -%}
+    {%- set r = pts / max -%}
+    {%- if r >= 0.75 -%}great{%- elif r >= 0.50 -%}good{%- elif r >= 0.25 -%}warn{%- else -%}bad{%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
 {% macro bandrow(label, band, fmt='pct') %}
 {% if band %}
 <tr class="{{ 'flag-' ~ band.flag if band.flag }}">
@@ -177,7 +184,7 @@
             {% for key, c in moat.components.items() %}
             <tr>
               <th>{{ key.replace('_', ' ').title() }}</th>
-              <td>{{ c.points }}/{{ c.max }}</td>
+              <td class="qval {{ score_class(c.points, c.max) }}">{{ c.points }}/{{ c.max }}</td>
               <td>
                 {% if c.current_rd_ratio is defined %}R&amp;D/rev ≥{{ "%.0f"|format(c.threshold*100) }}% threshold, {{ c.years_above_threshold }} yrs above, current {{ pct(c.current_rd_ratio) }}
                 {% elif c.threshold is defined %}≥{{ "%.0f"|format(c.threshold*100) }}% threshold,
@@ -207,7 +214,7 @@
             {% for key, c in report.story_moat.components.items() %}
             <tr>
               <th>{{ key.replace('_', ' ').title() }}</th>
-              <td>{{ c.points }}/{{ c.max }}</td>
+              <td class="qval {{ score_class(c.points, c.max) }}">{{ c.points }}/{{ c.max }}</td>
               <td>{{ c.note }}</td>
             </tr>
             {% endfor %}
@@ -236,7 +243,7 @@
             {% for key, c in report.growth_moat.components.items() %}
             <tr>
               <th>{{ key.replace('_', ' ').title() }}</th>
-              <td>{{ c.points }}/{{ c.max }}</td>
+              <td class="qval {{ score_class(c.points, c.max) }}">{{ c.points }}/{{ c.max }}</td>
               <td>{{ c.note }}</td>
             </tr>
             {% endfor %}
@@ -267,7 +274,7 @@
   <div class="kvgrid">
     <div><span>Intrinsic value / share</span><strong>${{ num(v.dcf.intrinsic_value_per_share) }}</strong></div>
     <div><span>Current price</span><strong>${{ num(v.dcf.current_price) }}</strong></div>
-    <div><span>Margin of safety</span><strong>{{ pct(v.dcf.margin_of_safety) }}</strong></div>
+    <div><span>Margin of safety</span><strong class="qval {% if v.dcf.margin_of_safety and v.dcf.margin_of_safety >= 0.30 %}great{% elif v.dcf.margin_of_safety and v.dcf.margin_of_safety >= 0.10 %}good{% elif v.dcf.margin_of_safety and v.dcf.margin_of_safety < 0 %}bad{% endif %}">{{ pct(v.dcf.margin_of_safety) }}</strong></div>
     <div><span>FCF base used</span><strong>${{ big(v.dcf.fcf_base_used) }}{% if v.dcf.base_label %} <span style="font-weight:400;font-size:0.8rem;color:var(--mute)">({{ v.dcf.base_label }})</span>{% endif %}</strong></div>
     <div><span>Growth assumed</span><strong>{{ pct(v.dcf.growth_assumed) }}</strong></div>
     <div><span>WACC</span><strong>{{ pct(v.dcf.wacc) }}</strong></div>
@@ -284,7 +291,7 @@
   {% if v.cash_return %}
   <h3>Cash return (FCF / EV) — Dorsey</h3>
   <div class="kvgrid">
-    <div><span>Cash return</span><strong>{{ pct(v.cash_return.value) }}</strong></div>
+    <div><span>Cash return</span><strong class="qval {% if v.cash_return.value and v.cash_return.value >= 0.08 %}great{% elif v.cash_return.value and v.cash_return.value >= 0.05 %}good{% elif v.cash_return.value and v.cash_return.value < 0.02 %}bad{% endif %}">{{ pct(v.cash_return.value) }}</strong></div>
     <div><span>Verdict</span><strong>{{ v.cash_return.verdict }}</strong></div>
   </div>
   <p class="hint">{{ v.cash_return.definition }}</p>
@@ -336,7 +343,7 @@
     {% if c.max > 0 %}
     <tr>
       <th>{{ key.replace('_', ' ').title() }}</th>
-      <td>{{ c.points }}/{{ c.max }}</td>
+      <td class="qval {{ score_class(c.points, c.max) }}">{{ c.points }}/{{ c.max }}</td>
       <td>{{ c.note }}</td>
     </tr>
     {% endif %}

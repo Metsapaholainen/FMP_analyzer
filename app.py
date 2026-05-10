@@ -182,6 +182,7 @@ async def analyze(
     ticker: str = Form(...),
     password: str = Form(...),
     moat_hypothesis: str = Form(default=""),
+    force_refresh: str = Form(default=""),
 ):
     if not _check_password(password):
         raise HTTPException(401, "Invalid password.")
@@ -196,11 +197,15 @@ async def analyze(
     hyp_hash = hashlib.md5(hyp.encode()).hexdigest()[:8] if hyp else "nohyp"
     cache_key = f"{t}_{hyp_hash}"
 
-    cached = _cache_get(cache_key)
+    do_refresh = bool(force_refresh)
+    cached = None if do_refresh else _cache_get(cache_key)
     if cached:
         report = cached
         report["_from_cache"] = True
     else:
+        if do_refresh:
+            # Delete existing cache entry so stale data is gone
+            _cache_path(cache_key).unlink(missing_ok=True)
         report = await run_pipeline(t, moat_hypothesis=hyp)
         report["_from_cache"] = False
         _cache_put(cache_key, report)
