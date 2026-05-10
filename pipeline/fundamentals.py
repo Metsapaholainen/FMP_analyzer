@@ -174,6 +174,10 @@ def build_fundamentals(raw: dict) -> dict:
     # Other income TTM (for red-flags)
     otherinc_ttm = (_sum_quarters(income_q, "otherIncome")
                     or _safe(income_ttm_ep.get("otherIncome")))
+    # Interest expense TTM (for coverage ratio)
+    int_exp_ttm = (_sum_quarters(income_q, "interestExpense")
+                   or _safe(income_ttm_ep.get("interestExpense"))
+                   or _safe(income_a[0].get("interestExpense") if income_a else None))
     # FCF / OCF TTM
     fcf_ttm = (_sum_quarters(cf_q, "freeCashFlow")
                or _safe(cf_ttm_ep.get("freeCashFlow"))
@@ -242,7 +246,11 @@ def build_fundamentals(raw: dict) -> dict:
     }
 
     price = _safe(quote.get("price")) or _safe(profile.get("price"))
-    market_cap = _safe(quote.get("marketCap")) or _safe(profile.get("mktCap"))
+    shares = (_safe(profile.get("sharesOutstanding"))
+              or _safe(quote.get("sharesOutstanding")))
+    market_cap = (_safe(quote.get("marketCap"))
+                  or _safe(profile.get("mktCap"))
+                  or ((price * shares) if price and shares else None))
 
     rev_hist = _income_history(income_a, "revenue")
     net_hist = _income_history(income_a, "netIncome")
@@ -415,10 +423,15 @@ def build_fundamentals(raw: dict) -> dict:
         metrics["debt_to_equity"]["current"], great=0.3, good=0.8, bad=2.0, critical=5.0,
         higher_is_better=False)
 
+    # Compute interest coverage from TTM operating income / TTM interest expense as fallback
+    # (ratios-ttm field name is inconsistent across FMP API versions)
+    _int_cov_computed = None
+    if opincome_ttm and int_exp_ttm and abs(int_exp_ttm) > 0:
+        _int_cov_computed = opincome_ttm / abs(int_exp_ttm)
     metrics["interest_coverage"] = _band(
         (ratios_ttm.get("interestCoverageRatioTTM")
          or ratios_ttm.get("interestCoverageTTM")
-         or km_ttm.get("interestCoverageTTM")),
+         or _int_cov_computed),
         (_ratio_history(ratios_a, "interestCoverage")
          or _ratio_history(ratios_a, "interestCoverageRatio")),
     )
@@ -456,7 +469,7 @@ def build_fundamentals(raw: dict) -> dict:
         "price": price,
         "market_cap": market_cap,
         "enterprise_value": _safe(km_ttm.get("enterpriseValueTTM")),
-        "shares_outstanding": _safe(profile.get("sharesOutstanding")) or _safe(quote.get("sharesOutstanding")),
+        "shares_outstanding": shares,
         "beta": _safe(profile.get("beta")),
         "description": profile.get("description") or "",
         "ceo": profile.get("ceo"),

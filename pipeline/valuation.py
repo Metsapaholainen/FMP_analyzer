@@ -73,7 +73,10 @@ def build_valuation(raw: dict, fundamentals: dict) -> dict:
 
     out = {"price": price, "skip_dcf": sector in DCF_SKIP_SECTORS}
 
-    # Enterprise value (computed, since FMP's EV may be stale)
+    # Enterprise value: compute from market_cap + debt - cash.
+    # If market_cap is null, try price × shares as second fallback.
+    if market_cap is None and price and shares:
+        market_cap = price * shares
     if market_cap is not None:
         ev = market_cap + total_debt - cash
         out["enterprise_value"] = ev
