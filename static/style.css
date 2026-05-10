@@ -134,6 +134,13 @@ tr.flag-depressed_vs_history td, tr.flag-depressed_vs_history th { background: r
 .moat-pane .big-score { font-size: 1.4rem; }
 .moat-pane table { min-width: 0; font-size: 0.86rem; }
 
+/* ---- Quality color coding for metric current values ---- */
+td.qval { font-weight: 600; }
+td.qval.great { color: #4ade80; }
+td.qval.good  { color: #86efac; }
+td.qval.bad   { color: var(--warn); }
+td.qval.critical { color: var(--bad); }
+
 /* ---- Chat follow-ups ---- */
 #chat-messages {
   display: flex;

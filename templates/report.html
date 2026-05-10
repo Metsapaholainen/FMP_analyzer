@@ -34,7 +34,7 @@
 {% if band %}
 <tr class="{{ 'flag-' ~ band.flag if band.flag }}">
   <th>{{ label }}</th>
-  <td>{% if fmt == 'pct' %}{{ pct(band.current) }}{% else %}{{ num(band.current) }}{% endif %}</td>
+  <td class="qval {{ band.quality or '' }}">{% if fmt == 'pct' %}{{ pct(band.current) }}{% else %}{{ num(band.current) }}{% endif %}</td>
   <td>{% if fmt == 'pct' %}{{ pct(band.avg_10y) }}{% else %}{{ num(band.avg_10y) }}{% endif %}</td>
   <td>{% if fmt == 'pct' %}{{ pct(band.high_10y) }}{% else %}{{ num(band.high_10y) }}{% endif %}</td>
   <td>{% if fmt == 'pct' %}{{ pct(band.low_10y) }}{% else %}{{ num(band.low_10y) }}{% endif %}</td>
@@ -313,6 +313,39 @@
   <p class="sub">{{ report.story_moat.components.smart_money.note }}</p>
   {% endif %}
 </section>
+
+<!-- CEO / CAPITAL ALLOCATION -->
+{% if report.ceo %}
+<section class="card">
+  <h2>CEO &amp; capital allocation</h2>
+  <p class="sub">Inspired by William Thorndike's <em>The Outsiders</em>. Scores management on ROIC vs cost of capital, buyback timing discipline, reinvestment quality, and balance sheet management.</p>
+  <div class="moat-verdict" style="margin-bottom:14px">
+    <div>
+      <div class="big-score">{{ report.ceo.score }}<span style="font-size:1rem;font-weight:400;color:var(--mute)">/50</span></div>
+    </div>
+    <div>
+      <strong>{{ report.ceo.verdict }}</strong>
+      {% if report.ceo.ceo_name %}<p class="hint" style="margin:2px 0 0">CEO: {{ report.ceo.ceo_name }} · WACC est. {{ "%.1f"|format(report.ceo.wacc_used*100) }}%</p>{% endif %}
+    </div>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Component</th><th>Score</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for key, c in report.ceo.components.items() %}
+    {% if c.max > 0 %}
+    <tr>
+      <th>{{ key.replace('_', ' ').title() }}</th>
+      <td>{{ c.points }}/{{ c.max }}</td>
+      <td>{{ c.note }}</td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
 
 <!-- RED FLAGS -->
 <section class="card">

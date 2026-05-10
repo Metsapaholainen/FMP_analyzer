@@ -100,6 +100,32 @@ def _cagr(series: list[float], years: int) -> float | None:
     return round((end / start) ** (1.0 / n) - 1.0, 4)
 
 
+def _quality_tag(val: float | None, great, good, bad, critical,
+                 higher_is_better: bool = True) -> str | None:
+    """Return quality label for absolute threshold coloring."""
+    if val is None:
+        return None
+    if higher_is_better:
+        if val >= great:
+            return "great"
+        if val >= good:
+            return "good"
+        if val <= critical:
+            return "critical"
+        if val <= bad:
+            return "bad"
+    else:
+        if val <= great:
+            return "great"
+        if val <= good:
+            return "good"
+        if val >= critical:
+            return "critical"
+        if val >= bad:
+            return "bad"
+    return None
+
+
 def build_fundamentals(raw: dict) -> dict:
     """Build the Step 1 metrics block from raw FMP fetch output."""
     profile = first(raw.get("profile"))
@@ -225,62 +251,141 @@ def build_fundamentals(raw: dict) -> dict:
 
     metrics: dict[str, Any] = {}
 
+    # Computed fallbacks for metrics FMP doesn't always surface via ratio endpoints
+    total_assets_latest = _safe(bs_latest.get("totalAssets"))
+    total_equity_latest = (_safe(bs_latest.get("totalStockholdersEquity"))
+                           or _safe(bs_latest.get("totalEquity")))
+    # price/market_cap already computed above
+
     # Valuation multiples
     metrics["pe"] = _band(
         ratios_ttm.get("priceToEarningsRatioTTM") or km_ttm.get("peRatioTTM") or _safe(quote.get("pe")),
         _ratio_history(ratios_a, "priceToEarningsRatio") or _ratio_history(ratios_a, "peRatio"),
         higher_is_worse=True,
     )
+    metrics["pe"]["quality"] = _quality_tag(
+        metrics["pe"]["current"], great=12, good=20, bad=35, critical=50, higher_is_better=False)
+
     metrics["ps"] = _band(
         ratios_ttm.get("priceToSalesRatioTTM"),
         _ratio_history(ratios_a, "priceToSalesRatio"),
         higher_is_worse=True,
     )
+    metrics["ps"]["quality"] = _quality_tag(
+        metrics["ps"]["current"], great=2, good=5, bad=10, critical=20, higher_is_better=False)
+
     metrics["pb"] = _band(
         ratios_ttm.get("priceToBookRatioTTM"),
         _ratio_history(ratios_a, "priceToBookRatio"),
         higher_is_worse=True,
     )
+    metrics["pb"]["quality"] = _quality_tag(
+        metrics["pb"]["current"], great=1.5, good=3, bad=7, critical=15, higher_is_better=False)
+
     metrics["peg"] = _band(
-        ratios_ttm.get("priceEarningsToGrowthRatioTTM"),
-        _ratio_history(ratios_a, "priceEarningsToGrowthRatio"),
+        (ratios_ttm.get("priceEarningsToGrowthRatioTTM")
+         or ratios_ttm.get("pegRatioTTM")
+         or km_ttm.get("pegRatioTTM")),
+        (_ratio_history(ratios_a, "priceEarningsToGrowthRatio")
+         or _ratio_history(ratios_a, "pegRatio")),
         higher_is_worse=True,
     )
-    metrics["earnings_yield"] = _band(
-        ratios_ttm.get("earningsYieldTTM"),
-        _ratio_history(ratios_a, "earningsYield"),
-    )
+    metrics["peg"]["quality"] = _quality_tag(
+        metrics["peg"]["current"], great=1.0, good=1.5, bad=3.0, critical=5.0, higher_is_better=False)
+
+    # Earnings yield: try ratios-ttm, then key-metrics-ttm, then compute as EPS/price
+    ey_ttm = (ratios_ttm.get("earningsYieldTTM")
+              or km_ttm.get("earningsYieldTTM"))
+    if ey_ttm is None and price:
+        pe_cur = metrics["pe"]["current"]
+        if pe_cur and pe_cur != 0:
+            ey_ttm = 1.0 / pe_cur
+    # Annual earnings yield: try ratios, then key_metrics, then compute from PE history
+    ey_hist = (_ratio_history(ratios_a, "earningsYield")
+               or _km_history(km_a, "earningsYield"))
+    if not ey_hist:
+        pe_hist = (_ratio_history(ratios_a, "priceToEarningsRatio")
+                   or _ratio_history(ratios_a, "peRatio"))
+        ey_hist = [1.0 / p for p in pe_hist if p and p != 0]
+    metrics["earnings_yield"] = _band(ey_ttm, ey_hist)
+    metrics["earnings_yield"]["quality"] = _quality_tag(
+        metrics["earnings_yield"]["current"], great=0.07, good=0.05, bad=0.02, critical=-0.01)
+
     metrics["dividend_yield"] = _band(
         ratios_ttm.get("dividendYieldTTM"),
         _ratio_history(ratios_a, "dividendYield"),
     )
+    # No quality tag for dividend yield — varies widely by sector/strategy
 
     # Profitability
-    metrics["roe"] = _band(
-        ratios_ttm.get("returnOnEquityTTM"),
-        _ratio_history(ratios_a, "returnOnEquity"),
-    )
-    metrics["roa"] = _band(
-        ratios_ttm.get("returnOnAssetsTTM"),
-        _ratio_history(ratios_a, "returnOnAssets"),
-    )
+    # ROE: try ratios-ttm, then key-metrics-ttm ('roe' field), then compute NI/equity
+    roe_ttm = (ratios_ttm.get("returnOnEquityTTM")
+               or km_ttm.get("returnOnEquityTTM")
+               or km_ttm.get("roe"))
+    if roe_ttm is None and net_income_ttm and total_equity_latest and total_equity_latest != 0:
+        roe_ttm = net_income_ttm / total_equity_latest
+    roe_hist = (_ratio_history(ratios_a, "returnOnEquity")
+                or _km_history(km_a, "returnOnEquity")
+                or _km_history(km_a, "roe"))
+    if not roe_hist:
+        for i_row, b_row in zip(income_a, bs_a):
+            ni = _safe(i_row.get("netIncome"))
+            eq = _safe(b_row.get("totalStockholdersEquity") or b_row.get("totalEquity"))
+            if ni is not None and eq and eq != 0:
+                roe_hist.append(ni / eq)
+    metrics["roe"] = _band(roe_ttm, roe_hist)
+    metrics["roe"]["quality"] = _quality_tag(
+        metrics["roe"]["current"], great=0.20, good=0.12, bad=0.05, critical=-0.01)
+
+    # ROA: try ratios-ttm, then key-metrics-ttm, then compute NI/assets
+    roa_ttm = (ratios_ttm.get("returnOnAssetsTTM")
+               or km_ttm.get("returnOnAssetsTTM")
+               or km_ttm.get("roa"))
+    if roa_ttm is None and net_income_ttm and total_assets_latest and total_assets_latest != 0:
+        roa_ttm = net_income_ttm / total_assets_latest
+    roa_hist = (_ratio_history(ratios_a, "returnOnAssets")
+                or _km_history(km_a, "returnOnAssets")
+                or _km_history(km_a, "roa"))
+    if not roa_hist:
+        for i_row, b_row in zip(income_a, bs_a):
+            ni = _safe(i_row.get("netIncome"))
+            ta = _safe(b_row.get("totalAssets"))
+            if ni is not None and ta and ta != 0:
+                roa_hist.append(ni / ta)
+    metrics["roa"] = _band(roa_ttm, roa_hist)
+    metrics["roa"]["quality"] = _quality_tag(
+        metrics["roa"]["current"], great=0.10, good=0.05, bad=0.01, critical=-0.01)
+
     metrics["roic"] = _band(
-        km_ttm.get("roicTTM") or ratios_ttm.get("returnOnInvestedCapitalTTM"),
+        (km_ttm.get("roicTTM")
+         or ratios_ttm.get("returnOnInvestedCapitalTTM")
+         or km_ttm.get("returnOnInvestedCapital")),
         [r.get("returnOnInvestedCapital") or r.get("roic") for r in km_a
          if (r.get("returnOnInvestedCapital") or r.get("roic")) is not None],
     )
+    metrics["roic"]["quality"] = _quality_tag(
+        metrics["roic"]["current"], great=0.25, good=0.15, bad=0.05, critical=-0.01)
     metrics["gross_margin"] = _band(
         ratios_ttm.get("grossProfitMarginTTM"),
         _ratio_history(ratios_a, "grossProfitMargin"),
     )
+    metrics["gross_margin"]["quality"] = _quality_tag(
+        metrics["gross_margin"]["current"], great=0.60, good=0.40, bad=0.15, critical=0.05)
+
     metrics["operating_margin"] = _band(
         ratios_ttm.get("operatingProfitMarginTTM"),
         _ratio_history(ratios_a, "operatingProfitMargin"),
     )
+    metrics["operating_margin"]["quality"] = _quality_tag(
+        metrics["operating_margin"]["current"], great=0.25, good=0.15, bad=0.03, critical=-0.05)
+
     metrics["net_margin"] = _band(
         ratios_ttm.get("netProfitMarginTTM"),
         _ratio_history(ratios_a, "netProfitMargin"),
     )
+    metrics["net_margin"]["quality"] = _quality_tag(
+        metrics["net_margin"]["current"], great=0.20, good=0.10, bad=0.02, critical=-0.05)
+
     metrics["fcf_margin"] = _band(
         (fcf_ttm / revenue_ttm) if (fcf_ttm and revenue_ttm) else None,
         [(c.get("freeCashFlow") / i.get("revenue"))
@@ -288,6 +393,8 @@ def build_fundamentals(raw: dict) -> dict:
          if c.get("freeCashFlow") is not None
          and i.get("revenue") not in (None, 0)],
     )
+    metrics["fcf_margin"]["quality"] = _quality_tag(
+        metrics["fcf_margin"]["current"], great=0.25, good=0.15, bad=0.02, critical=-0.10)
 
     # Solvency
     metrics["debt_to_equity"] = _band(
@@ -295,14 +402,26 @@ def build_fundamentals(raw: dict) -> dict:
         _ratio_history(ratios_a, "debtEquityRatio") or _ratio_history(ratios_a, "debtToEquityRatio"),
         higher_is_worse=True,
     )
+    metrics["debt_to_equity"]["quality"] = _quality_tag(
+        metrics["debt_to_equity"]["current"], great=0.3, good=0.8, bad=2.0, critical=5.0,
+        higher_is_better=False)
+
     metrics["interest_coverage"] = _band(
-        ratios_ttm.get("interestCoverageRatioTTM"),
-        _ratio_history(ratios_a, "interestCoverage"),
+        (ratios_ttm.get("interestCoverageRatioTTM")
+         or ratios_ttm.get("interestCoverageTTM")
+         or km_ttm.get("interestCoverageTTM")),
+        (_ratio_history(ratios_a, "interestCoverage")
+         or _ratio_history(ratios_a, "interestCoverageRatio")),
     )
+    metrics["interest_coverage"]["quality"] = _quality_tag(
+        metrics["interest_coverage"]["current"], great=10, good=5, bad=2, critical=1)
+
     metrics["current_ratio"] = _band(
         ratios_ttm.get("currentRatioTTM"),
         _ratio_history(ratios_a, "currentRatio"),
     )
+    metrics["current_ratio"]["quality"] = _quality_tag(
+        metrics["current_ratio"]["current"], great=2.0, good=1.5, bad=1.0, critical=0.5)
 
     # Growth (CAGRs from history)
     growth = {
@@ -342,8 +461,9 @@ def build_fundamentals(raw: dict) -> dict:
         "total_debt": _safe(bs_latest.get("totalDebt")),
         "cash_and_equivalents": _safe(bs_latest.get("cashAndCashEquivalents"))
             or _safe(bs_latest.get("cashAndShortTermInvestments")),
-        "total_equity": _safe(bs_latest.get("totalStockholdersEquity"))
-            or _safe(bs_latest.get("totalEquity")),
+        "total_equity": total_equity_latest,
+        "total_assets": total_assets_latest,
+        "ebitda_ttm": ebitda_ttm,
         "owner_earnings_ttm": owner_earnings_ttm,
         "piotroski_score": piotroski_score,
         "altman_z_score": altman_z_score,

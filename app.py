@@ -26,6 +26,7 @@ from pipeline.moat import build_moat, build_story_moat, build_growth_moat
 from pipeline.valuation import build_valuation
 from pipeline.red_flags import detect_red_flags
 from pipeline.ai_synthesis import synthesize, chat_followup
+from pipeline.ceo_analysis import build_ceo_analysis
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -143,6 +144,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
     moat = build_moat(raw, fundamentals)
     story_moat = build_story_moat(raw, fundamentals, moat)
     growth_moat = build_growth_moat(raw, fundamentals, moat)
+    ceo = build_ceo_analysis(raw, fundamentals, moat)
     valuation = build_valuation(raw, fundamentals)
     red_flags = detect_red_flags(raw, fundamentals)
     ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
@@ -158,6 +160,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
         "moat": moat,
         "story_moat": story_moat,
         "growth_moat": growth_moat,
+        "ceo": ceo,
         "valuation": valuation,
         "red_flags": red_flags,
         "ai": ai,
