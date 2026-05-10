@@ -208,6 +208,8 @@ def build_story_moat(raw: dict, fundamentals: dict, quant_moat: dict) -> dict:
     # A. Segment economics — high-margin / IP segment as % of revenue
     licensing_pct = snap.get("licensing_segment_pct")
     top_seg = snap.get("top_segment")
+    ratios_a = listify(raw.get("ratios_annual"))
+    gm_recent = _safe(ratios_a[0].get("grossProfitMargin")) if ratios_a else None
     if licensing_pct is not None:
         if licensing_pct >= 0.10:
             seg_pts = 12.5
@@ -221,11 +223,30 @@ def build_story_moat(raw: dict, fundamentals: dict, quant_moat: dict) -> dict:
         score += seg_pts; max_possible += 12.5
         components["segment_economics"] = {"points": round(seg_pts, 1), "max": 12.5, "note": seg_note}
     elif top_seg:
-        components["segment_economics"] = {
-            "points": 0.0, "max": 12.5,
-            "note": f"Largest segment '{top_seg['name']}' = {(top_seg['pct_of_total'] or 0)*100:.0f}% (no IP segment isolated)",
-        }
-        max_possible += 12.5
+        # No explicit IP/licensing segment — use gross margin as proxy for segment quality.
+        # SaaS/cloud/software companies with GM >65% are effectively IP-segment businesses.
+        top_name = (top_seg.get("name") or "").lower()
+        top_pct = top_seg.get("pct_of_total") or 0
+        is_recurring_seg = any(kw in top_name for kw in
+            ["digital", "cloud", "software", "subscription", "media", "service", "saas"])
+        if gm_recent is not None and gm_recent >= 0.65 and is_recurring_seg:
+            seg_pts = 8.0
+            seg_note = (f"'{top_seg['name']}' = {top_pct*100:.0f}% of rev; "
+                        f"GM {gm_recent*100:.0f}% suggests recurring/IP economics")
+        elif gm_recent is not None and gm_recent >= 0.65:
+            seg_pts = 6.0
+            seg_note = (f"'{top_seg['name']}' = {top_pct*100:.0f}% of rev; "
+                        f"high GM ({gm_recent*100:.0f}%) suggests IP economics")
+        elif gm_recent is not None and gm_recent >= 0.40:
+            seg_pts = 3.0
+            seg_note = (f"'{top_seg['name']}' = {top_pct*100:.0f}% of rev; "
+                        f"moderate GM ({gm_recent*100:.0f}%)")
+        else:
+            seg_pts = 0.0
+            seg_note = (f"Largest segment '{top_seg['name']}' = {top_pct*100:.0f}% "
+                        f"(no IP segment isolated)")
+        score += seg_pts; max_possible += 12.5
+        components["segment_economics"] = {"points": round(seg_pts, 1), "max": 12.5, "note": seg_note}
 
     # B. SEC filing moat language — keyword count in business description; gated on annual filing existing
     sec = listify(raw.get("sec_filings"))
@@ -233,12 +254,17 @@ def build_story_moat(raw: dict, fundamentals: dict, quant_moat: dict) -> dict:
                       if (f.get("formType") or f.get("type") or "").upper() in ("10-K", "20-F", "10-K/A", "20-F/A")]
     if annual_filings:
         desc = (snap.get("description") or "").lower()
-        moat_kw = ["patent", "switching cost", "network effect", "brand", "trademark", "license",
-                   "proprietary", "regulatory", "fda approval", "standards-essential", "royalty"]
+        moat_kw = [
+            "patent", "switching cost", "network effect", "brand", "trademark", "license",
+            "proprietary", "regulatory", "fda approval", "standards-essential", "royalty",
+            # Software / SaaS moat language
+            "ecosystem", "mission-critical", "recurring revenue", "subscription",
+            "platform", "integrated solution", "workflow", "lock-in",
+        ]
         hits = sum(1 for kw in moat_kw if kw in desc)
-        if hits >= 4:
+        if hits >= 5:
             sec_pts = 12.5
-        elif hits >= 2:
+        elif hits >= 3:
             sec_pts = 8.0
         elif hits >= 1:
             sec_pts = 4.0
@@ -281,8 +307,13 @@ def build_story_moat(raw: dict, fundamentals: dict, quant_moat: dict) -> dict:
         "note": "; ".join(coherence_notes) if coherence_notes else "no quant signals corroborate sector primary moats",
     }
 
-    # D. Smart money — insider net buying + quality institutional concentration
+    # D. Smart money — insider net buying.
+    # For large-caps (>$10B), 10b5-1 planned sales are routine so max is halved —
+    # a single insider buying signal still earns full proportional credit.
     insiders = listify(raw.get("insider_trades"))
+    market_cap = _safe(snap.get("market_cap"))
+    is_large_cap = market_cap is not None and market_cap > 10e9
+    sm_max = 6.25 if is_large_cap else 12.5
     if insiders:
         sm_pts = 0.0
         sm_notes: list[str] = []
@@ -304,16 +335,17 @@ def build_story_moat(raw: dict, fundamentals: dict, quant_moat: dict) -> dict:
                 sells += shares
         # Net buying scaled by magnitude — pure noise (small token grants etc.) shouldn't fire
         if buys > 0 and buys > sells * 1.5 and buys > 1000:
-            sm_pts += 12.5
+            sm_pts += sm_max
             sm_notes.append(f"insider net buying: {int(buys):,} bought vs {int(sells):,} sold (12mo)")
         elif buys > 0 and buys >= sells:
-            sm_pts += 6.0
+            sm_pts += sm_max * 0.5
             sm_notes.append(f"insider buying balanced: {int(buys):,} bought vs {int(sells):,} sold (12mo)")
         elif sells > 0:
-            sm_notes.append(f"insider selling dominates: {int(buys):,} bought vs {int(sells):,} sold (12mo)")
-        score += sm_pts; max_possible += 12.5
+            sm_notes.append(f"insider selling dominates: {int(buys):,} bought vs {int(sells):,} sold (12mo)"
+                            + (" — routine for large-cap (10b5-1 plans)" if is_large_cap else ""))
+        score += sm_pts; max_possible += sm_max
         components["smart_money"] = {
-            "points": round(sm_pts, 1), "max": 12.5,
+            "points": round(sm_pts, 1), "max": sm_max,
             "note": "; ".join(sm_notes) if sm_notes else "no notable insider signals",
         }
 
