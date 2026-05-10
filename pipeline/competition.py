@@ -74,7 +74,25 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
     income_a = listify(raw.get("income_annual"))
     km_ttm = first(raw.get("key_metrics_ttm"))
     ratios_ttm = first(raw.get("ratios_ttm"))
-    peer_metrics = raw.get("peer_metrics") or {}
+    raw_peers = raw.get("peer_metrics") or {}
+
+    # Filter peers to same industry first, then same sector — FMP's peer endpoint
+    # returns market-cap neighbors (often chips, hardware, consulting) that have
+    # nothing to do with the company's actual business competition.
+    def _peer_field(blob: dict, *keys: str) -> str:
+        pf = first(blob.get("profile"))
+        for k in keys:
+            v = pf.get(k)
+            if v:
+                return str(v).strip()
+        return ""
+
+    same_industry = {pt: b for pt, b in raw_peers.items()
+                     if _peer_field(b, "industry") == (industry or "")}
+    same_sector = {pt: b for pt, b in raw_peers.items()
+                   if _peer_field(b, "sector") == (sector or "")}
+    # Use same-industry peers if we have ≥2; otherwise fall back to same-sector
+    peer_metrics = same_industry if len(same_industry) >= 2 else (same_sector if same_sector else raw_peers)
 
     components: dict = {}
     score = 0.0
@@ -326,21 +344,28 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
     # Uses product + geo segmentation already in raw (no extra API calls).
     # Scores positively for diversification — concentrated single-segment or
     # single-geography revenue is a structural moat risk if that market shifts.
-    def _top_seg_pct(seg_list: list[dict]) -> tuple[str, float] | None:
-        """Return (segment_name, fraction) for the largest segment in the most
-        recent period. FMP flat format: [{date, SegA: val, SegB: val, ...}, ...]"""
+    def _top_seg_pct(seg_list: list[dict]) -> tuple[str, float, int] | None:
+        """Return (segment_name, fraction, n_segments) for the largest segment.
+        FMP format: [{fiscalYear, period, date, data: {SegA: val, SegB: val}}]
+        Falls back to top-level keys (older flat format) if 'data' absent."""
         if not seg_list:
             return None
         latest = seg_list[0]
-        vals = {k: _safe(v) for k, v in latest.items()
-                if k != "date" and _safe(v) is not None and _safe(v) > 0}
+        # Prefer nested 'data' dict (current FMP format)
+        raw_vals = latest.get("data") if isinstance(latest.get("data"), dict) else None
+        if raw_vals is None:
+            # Older flat format: skip non-segment keys
+            skip = {"date", "symbol", "fiscalYear", "period", "reportedCurrency", "cik", "fillingDate"}
+            raw_vals = {k: v for k, v in latest.items() if k not in skip}
+        vals = {k: _safe(v) for k, v in raw_vals.items()
+                if _safe(v) is not None and _safe(v) > 0}
         if not vals:
             return None
         total = sum(vals.values())
         if total <= 0:
             return None
         top_name = max(vals, key=lambda k: vals[k])
-        return top_name, vals[top_name] / total
+        return top_name, vals[top_name] / total, len(vals)
 
     prod_segs = listify(raw.get("segments_product"))
     geo_segs = listify(raw.get("segments_geo"))
@@ -353,9 +378,7 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
     rc_notes: list[str] = []
 
     if top_prod is not None:
-        pname, ppct = top_prod
-        n_segs = len([k for k, v in prod_segs[0].items()
-                       if k != "date" and _safe(v) is not None and _safe(v) > 0]) if prod_segs else 1
+        pname, ppct, n_segs = top_prod
         if ppct <= 0.40:
             prod_pts = 6.25
             prod_label = f"well diversified ({n_segs} segments, top '{pname}' = {ppct*100:.0f}%)"
@@ -372,7 +395,7 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
         rc_notes.append(f"Product: {prod_label}")
 
     if top_geo is not None:
-        gname, gpct = top_geo
+        gname, gpct, _ = top_geo
         if gpct <= 0.50:
             geo_pts = 6.25
             geo_label = f"globally diversified (top '{gname}' = {gpct*100:.0f}%)"
