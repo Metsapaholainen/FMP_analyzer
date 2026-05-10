@@ -305,15 +305,21 @@ def chat_followup(report: dict, message: str, history: list[dict],
     out_rate = 15.0 if use_sonnet else 5.0
     in_tok = msg.usage.input_tokens
     out_tok = msg.usage.output_tokens
-    # Approx cost — Anthropic billing splits cached vs uncached but the SDK's
-    # `usage` field reports the combined input count; this is a slight overestimate
-    # for cached follow-ups, which is fine for a rough cost meter.
-    cost = (in_tok / 1e6) * in_rate + (out_tok / 1e6) * out_rate
+    # Cached input is billed separately — write at 1.25x base, read at 0.1x base
+    cache_create = getattr(msg.usage, "cache_creation_input_tokens", 0) or 0
+    cache_read = getattr(msg.usage, "cache_read_input_tokens", 0) or 0
+    cost = (
+        (in_tok / 1e6) * in_rate
+        + (cache_create / 1e6) * in_rate * 1.25
+        + (cache_read / 1e6) * in_rate * 0.1
+        + (out_tok / 1e6) * out_rate
+    )
     return {
         "response": text,
         "model": model,
-        "input_tokens": in_tok,
+        "input_tokens": in_tok + cache_create + cache_read,
         "output_tokens": out_tok,
+        "cache_read_tokens": cache_read,
         "cost_usd": round(cost, 5),
     }
 
