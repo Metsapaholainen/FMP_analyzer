@@ -31,14 +31,22 @@ def _ai_competitor_tickers(ticker: str, name: str, description: str,
         ac = anthropic.Anthropic()
         msg = ac.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=80,
+            max_tokens=100,
             temperature=0,
+            system=(
+                "You are a financial analyst. When asked for competitors, return only companies "
+                "that sell the SAME TYPE of product or service to the SAME customer segments. "
+                "Never include companies from unrelated industries (semiconductors, hardware, "
+                "streaming, telecom, retail) unless they directly sell the same product. "
+                "Reply with ONLY comma-separated ticker symbols, nothing else."
+            ),
             messages=[{"role": "user", "content": (
-                f"List 5-7 publicly traded direct business competitors to {ticker} "
-                f"({name}), a {sector} / {industry} company. "
-                f"Description: {description[:300]}. "
-                f"US-listed stocks only. Return ONLY ticker symbols, comma-separated, "
-                f"no explanation, no extra text."
+                f"Ticker: {ticker} | Company: {name}\n"
+                f"Industry: {industry} | Sector: {sector}\n"
+                f"What it sells: {description[:400]}\n\n"
+                f"List 5-7 publicly traded direct product competitors — companies a customer "
+                f"would buy from INSTEAD of {name}. US-listed preferred. "
+                f"Tickers only, comma-separated."
             )}],
         )
         text = "".join(b.text for b in msg.content if hasattr(b, "text"))
