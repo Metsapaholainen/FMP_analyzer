@@ -23,11 +23,77 @@ def _news_snippet(item: dict, text_key: str = "text") -> str:
     return (" — " + body[:120] + ("…" if len(body) > 120 else "")) if body else ""
 
 
+# Keywords for extracting material corporate actions from news/press releases
+_BUYBACK_KW = ("repurchase", "buyback", "buy back", "share repurchase", "stock repurchase")
+_DIVIDEND_KW = ("dividend", "quarterly dividend", "special dividend")
+_MA_KW = ("acqui", "merger", "acquires", "acquired", "acquisition")
+_GUIDANCE_KW = ("guidance", "outlook", "raises", "lowers", "reaffirm", "forecast", "fiscal year")
+_PARTNERSHIP_KW = ("partnership", "agreement", "deal", "strategic", "collaboration", "license")
+
+
+def _extract_corporate_actions(news_raw: list, press_raw: list) -> str:
+    """Scan all news + press releases for material corporate actions and return
+    a prominently formatted block so the AI can't miss capital allocation events."""
+    all_items = press_raw + news_raw  # press releases first (more authoritative)
+    seen: set[str] = set()
+    buckets: dict[str, list[str]] = {
+        "SHARE REPURCHASE / BUYBACK PROGRAMS": [],
+        "DIVIDENDS": [],
+        "M&A / ACQUISITIONS": [],
+        "EARNINGS GUIDANCE / OUTLOOK": [],
+        "STRATEGIC PARTNERSHIPS & DEALS": [],
+    }
+
+    for item in all_items:
+        title = (item.get("title") or "").strip()
+        text = (item.get("text") or item.get("summary") or "").strip()
+        combined = (title + " " + text[:300]).lower()
+        date = (item.get("date") or item.get("publishedDate") or "")[:10]
+        key = title[:80]
+        if not title or key in seen:
+            continue
+        seen.add(key)
+
+        snippet = _news_snippet(item)
+        entry = f"  [{date}] {title}{snippet}"
+        is_pr = item in press_raw
+        src = " (press release)" if is_pr else ""
+
+        if any(kw in combined for kw in _BUYBACK_KW):
+            buckets["SHARE REPURCHASE / BUYBACK PROGRAMS"].append(entry + src)
+        elif any(kw in combined for kw in _DIVIDEND_KW):
+            buckets["DIVIDENDS"].append(entry + src)
+        elif any(kw in combined for kw in _MA_KW):
+            buckets["M&A / ACQUISITIONS"].append(entry + src)
+        elif any(kw in combined for kw in _GUIDANCE_KW):
+            buckets["EARNINGS GUIDANCE / OUTLOOK"].append(entry + src)
+        elif any(kw in combined for kw in _PARTNERSHIP_KW):
+            buckets["STRATEGIC PARTNERSHIPS & DEALS"].append(entry + src)
+
+    # Only emit buckets that have content, limit to 4 entries each
+    lines = []
+    for label, entries in buckets.items():
+        if entries:
+            lines.append(f"{label}:")
+            lines.extend(entries[:4])
+    if not lines:
+        return ""
+    return (
+        "MATERIAL CORPORATE ACTIONS (treat all items below as confirmed facts — "
+        "these directly affect capital allocation and strategic positioning):\n"
+        + "\n".join(lines) + "\n\n"
+    )
+
+
 def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
                   moat_hypothesis: str, raw: dict | None = None) -> str:
     # ── News & press releases block ────────────────────────────────────────
     news_raw = listify(raw.get("stock_news")) if raw else []
     press_raw = listify(raw.get("press_releases")) if raw else []
+
+    # Corporate actions block — prominently separated so AI addresses buybacks,
+    # M&A, and guidance explicitly (not buried in general news)
+    corporate_actions_block = _extract_corporate_actions(news_raw, press_raw)
 
     news_lines = []
     for n in news_raw[:12]:
@@ -48,17 +114,15 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         if title:
             pr_lines.append(f"  - [{date}] {title}{_news_snippet(p)}")
 
-    news_block = ""
+    news_block = corporate_actions_block  # lead with structured corporate actions
     if news_lines:
         news_block += (
-            "RECENT NEWS (treat capital allocation announcements, M&A, and guidance changes "
-            "as material facts; use sentiment/qualitative claims more cautiously):\n"
+            "RECENT NEWS (context and sentiment — verify numbers against filings):\n"
             + "\n".join(news_lines) + "\n\n"
         )
     if pr_lines:
         news_block += (
-            "COMPANY PRESS RELEASES (authoritative — treat buyback programs, strategic "
-            "partnerships, earnings guidance, and restructuring as confirmed facts):\n"
+            "PRESS RELEASES (authoritative source for official company statements):\n"
             + "\n".join(pr_lines) + "\n\n"
         )
 
