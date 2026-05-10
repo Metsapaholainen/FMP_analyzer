@@ -42,6 +42,8 @@ def _ai_competitor_tickers(ticker: str, name: str, description: str,
             temperature=0,
             system=(
                 "You are a financial analyst identifying direct product competitors. "
+                "Use your own knowledge of the company's CURRENT business — "
+                "the description provided may be outdated (e.g. a company may have pivoted). "
                 "Return EXACTLY 2 lines, no other text:\n"
                 "LINE 1 — All real direct competitors (same product, same customers). "
                 "Mark private companies with '(private)'. Comma-separated names.\n"
@@ -53,8 +55,9 @@ def _ai_competitor_tickers(ticker: str, name: str, description: str,
             messages=[{"role": "user", "content": (
                 f"Company: {ticker} ({name})\n"
                 f"Industry: {industry} | Sector: {sector}\n"
-                f"What it sells: {description[:400]}\n\n"
-                f"List its direct product competitors using the 2-line format."
+                f"Context (may be outdated): {description[:300]}\n\n"
+                f"Based on what {ticker} actually does TODAY, list its direct "
+                f"product competitors using the 2-line format."
             )}],
         )
         text = "".join(b.text for b in msg.content if hasattr(b, "text")).strip()
