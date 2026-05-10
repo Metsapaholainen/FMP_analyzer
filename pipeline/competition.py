@@ -6,11 +6,12 @@ pressure facing it. A high-ROIC compounder facing many converging peers is
 fragile; the same compounder in a regulated, capital-intensive 2-player
 industry is a fortress.
 
-Four signal sources (each 0-12.5, total max 50):
-  A. Peer outperformance — ROIC and GM spread vs peer cohort median
+Five signal sources (each 0-12.5, total max 62.5):
+  A. Peer outperformance    — ROIC and GM spread vs peer cohort; P/E/EV context
   B. Industry concentration — peer count + market-cap rank
-  C. Margin & ROIC trend stability — slope of last 8 annual periods
-  D. Pricing power proxies — GM level vs sector floor + GM CV
+  C. Trend stability        — slope of last 8 annual ROIC + op-margin periods
+  D. Pricing power proxies  — GM level vs sector floor + GM CV
+  E. Revenue concentration  — product segment + geographic concentration risk
 """
 from __future__ import annotations
 
@@ -140,6 +141,29 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
                 f"GM {company_gm*100:.0f}% vs peer median {peer_med_gm*100:.0f}% "
                 f"({gm_spread*100:+.0f}pp)"
             )
+
+        # Peer valuation context — P/E and EV/EBITDA vs peer cohort (informational,
+        # not scored: valuation is Step 3's job; here it shows market recognition)
+        company_pe = _safe(ratios_ttm.get("peRatioTTM")) or _safe(km_ttm.get("peRatioTTM"))
+        company_ev_ebitda = _safe(km_ttm.get("evToEbitdaTTM") or km_ttm.get("enterpriseValueOverEBITDATTM"))
+        peer_pes = [_safe(first(b.get("ratios_ttm")).get("peRatioTTM"))
+                    for b in peer_metrics.values()]
+        peer_pes = [p for p in peer_pes if p is not None and 0 < p < 200]
+        peer_ev_ebs = [_safe(first(b.get("key_metrics_ttm")).get("evToEbitdaTTM")
+                             or first(b.get("key_metrics_ttm")).get("enterpriseValueOverEBITDATTM"))
+                       for b in peer_metrics.values()]
+        peer_ev_ebs = [p for p in peer_ev_ebs if p is not None and 0 < p < 150]
+        val_notes: list[str] = []
+        if company_pe and peer_pes:
+            med_pe = statistics.median(peer_pes)
+            premium = (company_pe / med_pe - 1) * 100
+            val_notes.append(f"P/E {company_pe:.0f}x vs peers {med_pe:.0f}x ({premium:+.0f}%)")
+        if company_ev_ebitda and peer_ev_ebs:
+            med_ev = statistics.median(peer_ev_ebs)
+            premium = (company_ev_ebitda / med_ev - 1) * 100
+            val_notes.append(f"EV/EBITDA {company_ev_ebitda:.0f}x vs peers {med_ev:.0f}x ({premium:+.0f}%)")
+        if val_notes:
+            notes_a.append("Valuation vs peers: " + ", ".join(val_notes))
 
         if low_coverage:
             notes_a.append(f"low peer coverage ({n_peer_data} peers)")
@@ -298,9 +322,82 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
             "note": f"{level_label}; {stab_label}",
         }
 
+    # --- E. Revenue concentration -----------------------------------------------
+    # Uses product + geo segmentation already in raw (no extra API calls).
+    # Scores positively for diversification — concentrated single-segment or
+    # single-geography revenue is a structural moat risk if that market shifts.
+    def _top_seg_pct(seg_list: list[dict]) -> tuple[str, float] | None:
+        """Return (segment_name, fraction) for the largest segment in the most
+        recent period. FMP flat format: [{date, SegA: val, SegB: val, ...}, ...]"""
+        if not seg_list:
+            return None
+        latest = seg_list[0]
+        vals = {k: _safe(v) for k, v in latest.items()
+                if k != "date" and _safe(v) is not None and _safe(v) > 0}
+        if not vals:
+            return None
+        total = sum(vals.values())
+        if total <= 0:
+            return None
+        top_name = max(vals, key=lambda k: vals[k])
+        return top_name, vals[top_name] / total
+
+    prod_segs = listify(raw.get("segments_product"))
+    geo_segs = listify(raw.get("segments_geo"))
+
+    top_prod = _top_seg_pct(prod_segs)
+    top_geo = _top_seg_pct(geo_segs)
+
+    rc_pts = 0.0
+    rc_max = 0.0
+    rc_notes: list[str] = []
+
+    if top_prod is not None:
+        pname, ppct = top_prod
+        n_segs = len([k for k, v in prod_segs[0].items()
+                       if k != "date" and _safe(v) is not None and _safe(v) > 0]) if prod_segs else 1
+        if ppct <= 0.40:
+            prod_pts = 6.25
+            prod_label = f"well diversified ({n_segs} segments, top '{pname}' = {ppct*100:.0f}%)"
+        elif ppct <= 0.60:
+            prod_pts = 4.0
+            prod_label = f"moderately concentrated (top '{pname}' = {ppct*100:.0f}% of revenue)"
+        elif ppct <= 0.80:
+            prod_pts = 2.0
+            prod_label = f"concentrated: '{pname}' = {ppct*100:.0f}% of revenue"
+        else:
+            prod_pts = 0.0
+            prod_label = f"single-segment risk: '{pname}' = {ppct*100:.0f}% of revenue"
+        rc_pts += prod_pts; rc_max += 6.25
+        rc_notes.append(f"Product: {prod_label}")
+
+    if top_geo is not None:
+        gname, gpct = top_geo
+        if gpct <= 0.50:
+            geo_pts = 6.25
+            geo_label = f"globally diversified (top '{gname}' = {gpct*100:.0f}%)"
+        elif gpct <= 0.70:
+            geo_pts = 4.0
+            geo_label = f"moderate geo concentration ('{gname}' = {gpct*100:.0f}%)"
+        elif gpct <= 0.85:
+            geo_pts = 2.0
+            geo_label = f"geo concentrated: '{gname}' = {gpct*100:.0f}% of revenue"
+        else:
+            geo_pts = 0.0
+            geo_label = f"single-market risk: '{gname}' = {gpct*100:.0f}% of revenue"
+        rc_pts += geo_pts; rc_max += 6.25
+        rc_notes.append(f"Geo: {geo_label}")
+
+    if rc_max > 0:
+        score += rc_pts; max_possible += rc_max
+        components["revenue_concentration"] = {
+            "points": round(rc_pts, 1), "max": round(rc_max, 2),
+            "note": "; ".join(rc_notes) if rc_notes else "no segment data",
+        }
+
     # --- Verdict -----------------------------------------------------------------
     score = round(score, 1)
-    max_score = round(max_possible, 1) if max_possible > 0 else 50.0
+    max_score = round(max_possible, 2) if max_possible > 0 else 62.5
     pct = (score / max_score) if max_score > 0 else 0.0
     if pct >= 0.80:
         verdict = "Fortress — competition kept at bay"
