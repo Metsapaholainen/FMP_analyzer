@@ -913,6 +913,61 @@ def _build_earnings_quality(raw: dict) -> list[dict] | None:
     return rows or None
 
 
+def _build_cash_gen(fundamentals: dict | None) -> dict | None:
+    """Five headline cash-generation metrics from TTM data for the summary strip."""
+    if not fundamentals:
+        return None
+    snap = fundamentals.get("snapshot") or {}
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    ocf = _s(snap.get("ocf_ttm"))
+    fcf = _s(snap.get("fcf_ttm"))
+    rev = _s(snap.get("revenue_ttm"))
+    mkt = _s(snap.get("market_cap"))
+    shr = _s(snap.get("shares_outstanding"))
+
+    if not ocf and not fcf:
+        return None
+
+    fcf_margin  = round(fcf / rev * 100, 1)  if (fcf is not None and rev and rev > 0) else None
+    fcf_yield   = round(fcf / mkt * 100, 1)  if (fcf is not None and mkt and mkt > 0) else None
+    fcf_per_shr = round(fcf / shr, 2)        if (fcf is not None and shr and shr > 0) else None
+
+    def _bn(v):
+        return f"${v/1e9:.1f}B" if v is not None else None
+
+    # Quality bands for colour coding
+    def _yield_q(y):
+        if y is None: return ""
+        if y >= 5:   return "great"
+        if y >= 3:   return "good"
+        if y >= 1.5: return "warn"
+        return "bad"
+
+    def _margin_q(m):
+        if m is None: return ""
+        if m >= 20:  return "great"
+        if m >= 10:  return "good"
+        if m >= 5:   return "warn"
+        return "bad"
+
+    return {
+        "ocf_b":         _bn(ocf),
+        "fcf_b":         _bn(fcf),
+        "fcf_margin":    f"{fcf_margin:.1f}%" if fcf_margin is not None else None,
+        "fcf_margin_q":  _margin_q(fcf_margin),
+        "fcf_yield":     f"{fcf_yield:.1f}%"  if fcf_yield  is not None else None,
+        "fcf_yield_q":   _yield_q(fcf_yield),
+        "fcf_per_share": f"${fcf_per_shr:.2f}" if fcf_per_shr is not None else None,
+    }
+
+
 def _extract_10k_risks(raw: dict) -> list[dict] | None:
     """Use Haiku to extract the 5 most material risks from the raw 10-K risk text.
 
@@ -1182,6 +1237,7 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     filled = sum(1 for v in result.values() if v)
     log.info("Step4 parsed %d/6 sections for %s", filled, ticker)
     result["_per1000"]          = per1000
+    result["_cash_gen"]         = _build_cash_gen(fundamentals)
     result["_cap_alloc"]        = _build_cap_alloc(raw)                         if raw else None
     result["_margin_trend"]     = _build_margin_trend(raw)                      if raw else None
     result["_earnings_quality"] = _build_earnings_quality(raw)                  if raw else None

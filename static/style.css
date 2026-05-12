@@ -519,6 +519,44 @@ button:hover { filter: brightness(1.05); }
   line-height: 1.4;
 }
 
+/* ---- Cash generation summary strip ---- */
+.cashgen-strip {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 12px 0 20px;
+}
+@media (min-width: 500px) { .cashgen-strip { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 900px) { .cashgen-strip { grid-template-columns: repeat(5, 1fr); } }
+.cashgen-cell {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cashgen-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mute);
+}
+.cashgen-val {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--fg);
+}
+.cashgen-val.great { color: #4ade80; }
+.cashgen-val.good  { color: #86efac; }
+.cashgen-val.warn  { color: var(--warn); }
+.cashgen-val.bad   { color: var(--bad); }
+.cashgen-note {
+  font-size: 0.68rem;
+  color: var(--mute);
+}
+
 /* ---- 10-K Risk Factors section ---- */
 .badge-source {
   display: inline-block;

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=14">
+<link rel="stylesheet" href="/static/style.css?v=15">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -609,10 +609,51 @@
 
 <!-- CAPITAL ALLOCATION CHART -->
 {% set ca = report.ai_step4._cap_alloc if report.ai_step4 else none %}
+{% set cg = report.ai_step4._cash_gen   if report.ai_step4 else none %}
 {% if ca %}
 <section class="card">
   <h2>Capital allocation</h2>
   <p class="sub">Where does operating cash flow go? Per $1,000 of OCF{% if ca.year %} · FY{{ ca.year }}{% endif %}{% if ca.ocf_b %} · total ${{ ca.ocf_b }}B{% endif %}</p>
+
+  {% if cg %}
+  <div class="cashgen-strip">
+    {% if cg.ocf_b %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">Operating cash flow</span>
+      <strong class="cashgen-val">{{ cg.ocf_b }}</strong>
+      <span class="cashgen-note">TTM · before capex</span>
+    </div>
+    {% endif %}
+    {% if cg.fcf_b %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">Free cash flow</span>
+      <strong class="cashgen-val">{{ cg.fcf_b }}</strong>
+      <span class="cashgen-note">TTM · after capex</span>
+    </div>
+    {% endif %}
+    {% if cg.fcf_margin %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">FCF margin</span>
+      <strong class="cashgen-val {{ cg.fcf_margin_q }}">{{ cg.fcf_margin }}</strong>
+      <span class="cashgen-note">of every $1 revenue</span>
+    </div>
+    {% endif %}
+    {% if cg.fcf_yield %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">FCF yield</span>
+      <strong class="cashgen-val {{ cg.fcf_yield_q }}">{{ cg.fcf_yield }}</strong>
+      <span class="cashgen-note">FCF ÷ market cap</span>
+    </div>
+    {% endif %}
+    {% if cg.fcf_per_share %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">FCF / share</span>
+      <strong class="cashgen-val">{{ cg.fcf_per_share }}</strong>
+      <span class="cashgen-note">TTM</span>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
   <div class="capalloc-grid">
     {# Outflows — uses of cash #}
     {% set alloc_rows = [
