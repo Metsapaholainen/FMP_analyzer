@@ -413,6 +413,9 @@ button:hover { filter: brightness(1.05); }
   padding-top: 10px;
 }
 
+/* ---- Capital allocation chart ---- */
+.capalloc-grid { display: flex; flex-direction: column; gap: 6px; }
+
 /* ---- Segment growth bar chart (Growth pillar) ---- */
 .seg-breakdown {
   margin-top: 12px;

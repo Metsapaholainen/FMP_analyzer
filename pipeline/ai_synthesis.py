@@ -384,6 +384,67 @@ def _build_per1000(raw: dict) -> dict | None:
     }
 
 
+def _build_cap_alloc(raw: dict) -> dict | None:
+    """Per-$1,000-OCF capital allocation breakdown from the most recent annual filing."""
+    cf_a = raw.get("cashflow_annual") or []
+    if not cf_a:
+        return None
+    cf = cf_a[0]
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    ocf = _s(cf.get("operatingCashFlow"))
+    if not ocf or ocf <= 0:
+        return None
+
+    def pa(v):  # per $1,000 OCF as absolute value
+        x = _s(v)
+        return round(abs(x) / ocf * 1000) if x is not None else None
+
+    def pa_signed(v):  # keep sign (positive = inflow / source of cash)
+        x = _s(v)
+        return round(x / ocf * 1000) if x is not None else None
+
+    capex       = pa(cf.get("capitalExpenditure"))
+    acquisitions_raw = _s(cf.get("acquisitionsNet"))
+    acquisitions = round(abs(acquisitions_raw) / ocf * 1000) if (acquisitions_raw is not None and acquisitions_raw < 0) else None
+    dividends   = pa(cf.get("dividendsPaid"))
+    buybacks    = pa(cf.get("commonStockRepurchased"))
+
+    # Debt: repayment (outflow) and new issuance (inflow) shown separately
+    debt_repay_raw = _s(cf.get("debtRepayment"))
+    debt_repay = round(abs(debt_repay_raw) / ocf * 1000) if (debt_repay_raw is not None and debt_repay_raw < 0) else None
+
+    debt_issued_raw = _s(cf.get("debtIssuance") or cf.get("longTermDebtIssuance") or cf.get("commonStockIssued"))
+    # only show if it looks like a debt issuance (separate from equity issuance)
+    debt_issued_raw2 = _s(cf.get("debtIssuance") or cf.get("longTermDebtIssuance"))
+    debt_issued = round(debt_issued_raw2 / ocf * 1000) if (debt_issued_raw2 is not None and debt_issued_raw2 > 0) else None
+
+    # Residual → cash accumulated / other financing
+    outflows = sum(v for v in [capex, acquisitions, dividends, buybacks, debt_repay] if v is not None)
+    inflows  = sum(v for v in [debt_issued] if v is not None)
+    residual_val = round(1000 - outflows + inflows)
+    residual = residual_val if abs(residual_val) > 10 else None
+
+    year = (cf.get("calendarYear") or (cf.get("date") or "")[:4] or "")
+    return {
+        "year": year,
+        "ocf_b": round(ocf / 1e9, 1),
+        "capex": capex,
+        "acquisitions": acquisitions,
+        "dividends": dividends,
+        "buybacks": buybacks,
+        "debt_repay": debt_repay,
+        "debt_issued": debt_issued,
+        "residual": residual,
+    }
+
+
 def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
                      raw: dict | None = None,
                      competition: dict | None = None,
@@ -612,7 +673,8 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
 
     filled = sum(1 for v in result.values() if v)
     log.info("Step4 parsed %d/6 sections for %s", filled, ticker)
-    result["_per1000"] = per1000  # pass raw numbers through for template display
+    result["_per1000"] = per1000
+    result["_cap_alloc"] = _build_cap_alloc(raw) if raw else None
     return result
 
 
