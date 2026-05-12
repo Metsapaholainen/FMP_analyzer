@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=5">
+<link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -401,16 +401,15 @@
     </div>
     {% if p1k %}
     <div class="per1k-grid">
-      {% set rows = [
-        ("Cost of goods / delivery", p1k.cogs, "var(--bad)"),
-        ("Research & development",   p1k.rd,   "#a78bfa"),
-        ("Sales, marketing & admin", p1k.sga,  "var(--warn)"),
-        ("Operating profit",         p1k.op_income, "var(--accent)"),
-        ("Taxes",                    p1k.taxes, "var(--mute)"),
-        ("Net profit",               p1k.net_income, "var(--good)"),
-        ("Free cash flow",           p1k.fcf,  "#5eead4"),
+      {# Cost breakdown — these sum to ~$1,000 with net profit #}
+      {% set cost_rows = [
+        ("Cost of goods / delivery", p1k.cogs,       "var(--bad)"),
+        ("Research & development",   p1k.rd,          "#a78bfa"),
+        ("Sales, marketing & admin", p1k.sga,         "var(--warn)"),
+        ("Taxes",                    p1k.taxes,        "#6b7280"),
+        ("Net profit",               p1k.net_income,  "var(--good)"),
       ] %}
-      {% for label, val, color in rows %}
+      {% for label, val, color in cost_rows %}
         {% if val is not none and val != 0 %}
         <div class="per1k-row">
           <span class="per1k-label">{{ label }}</span>
@@ -421,7 +420,31 @@
         </div>
         {% endif %}
       {% endfor %}
-      <div class="per1k-note">per $1,000 revenue{% if p1k.year %} · FY{{ p1k.year }}{% endif %}{% if p1k.revenue_b %} · total revenue ${{ p1k.revenue_b }}B{% endif %}</div>
+
+      {# Derived metrics — shown below the divider, do NOT sum with costs #}
+      {% if p1k.op_income is not none or p1k.fcf is not none %}
+      <div class="per1k-divider"></div>
+      {% endif %}
+      {% if p1k.op_income is not none %}
+      <div class="per1k-row per1k-derived">
+        <span class="per1k-label">Operating profit <span class="per1k-derived-note">(before interest &amp; tax)</span></span>
+        <div class="per1k-bar-wrap">
+          <div class="per1k-bar" style="width:{{ [p1k.op_income, 0] | max }}%;background:var(--accent);opacity:0.5"></div>
+        </div>
+        <span class="per1k-val" style="color:var(--accent)">${{ p1k.op_income }}</span>
+      </div>
+      {% endif %}
+      {% if p1k.fcf is not none %}
+      <div class="per1k-row per1k-derived">
+        <span class="per1k-label">Free cash flow <span class="per1k-derived-note">(net profit ± D&amp;A, SBC, capex)</span></span>
+        <div class="per1k-bar-wrap">
+          <div class="per1k-bar" style="width:{{ [p1k.fcf, 0] | max }}%;background:#5eead4;opacity:0.5"></div>
+        </div>
+        <span class="per1k-val" style="color:#5eead4">${{ p1k.fcf }}</span>
+      </div>
+      {% endif %}
+
+      <div class="per1k-note">Top rows sum to ~$1,000 · per $1,000 revenue{% if p1k.year %} · FY{{ p1k.year }}{% endif %}{% if p1k.revenue_b %} · total ${{ p1k.revenue_b }}B{% endif %}</div>
     </div>
     {% endif %}
     {% if biz_text %}

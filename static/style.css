@@ -395,6 +395,9 @@ button:hover { filter: brightness(1.05); }
 .per1k-bar { border-radius: 3px; height: 7px; min-width: 2px; max-width: 100%; opacity: 0.85; }
 .per1k-val { font-weight: 700; text-align: right; font-size: 0.83rem; }
 .per1k-note { font-size: 0.72rem; color: var(--mute); margin-top: 4px; }
+.per1k-divider { border-top: 1px dashed var(--border); margin: 4px 0; }
+.per1k-derived .per1k-label { color: var(--mute); }
+.per1k-derived-note { font-size: 0.72rem; color: var(--mute); font-weight: 400; }
 .biz-model-text {
   margin: 0;
   font-size: 0.9rem;
