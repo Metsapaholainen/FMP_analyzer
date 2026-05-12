@@ -41,7 +41,7 @@ CACHE_TTL_DAYS = 7
 
 app = FastAPI(title="FMP Analyzer")
 app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
-templates = Jinja2Templates(directory=str(ROOT / "templates"))
+templates = Jinja2Templates(directory=str(ROOT / "templates"), auto_reload=True)
 
 
 def _safe_markdown(text: str) -> str:
