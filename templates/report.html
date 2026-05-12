@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=9">
+<link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -573,9 +573,10 @@
       {% endif %}
     {% endfor %}
 
-    {# Inflows — new loans taken on #}
-    {% if ca.debt_issued and ca.debt_issued > 0 %}
+    {# Inflows — cash sources beyond OCF #}
+    {% if (ca.debt_issued and ca.debt_issued > 0) or (ca.stock_issued and ca.stock_issued > 0) %}
     <div class="per1k-divider"></div>
+    {% if ca.debt_issued and ca.debt_issued > 0 %}
     <div class="per1k-row">
       <span class="per1k-label" style="color:var(--warn)">+ New loans / debt raised</span>
       <div class="per1k-bar-wrap">
@@ -584,6 +585,17 @@
       <span class="per1k-val" style="color:var(--warn)">+${{ ca.debt_issued }}</span>
       <span class="per1k-subtext">new borrowing adds to allocation pool</span>
     </div>
+    {% endif %}
+    {% if ca.stock_issued and ca.stock_issued > 0 %}
+    <div class="per1k-row">
+      <span class="per1k-label" style="color:#a78bfa">+ New shares issued</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ ((ca.stock_issued / 10) | round(1)) }}%;background:#a78bfa;opacity:0.7"></div>
+      </div>
+      <span class="per1k-val" style="color:#a78bfa">+${{ ca.stock_issued }}</span>
+      <span class="per1k-subtext">options exercised / secondary offering proceeds</span>
+    </div>
+    {% endif %}
     {% endif %}
 
     {# Residual #}
@@ -611,7 +623,7 @@
 
     {# Footer: make the arithmetic explicit #}
     {% set total_out = (ca.capex or 0) + (ca.acquisitions or 0) + (ca.dividends or 0) + (ca.buybacks or 0) + (ca.debt_repay or 0) %}
-    {% set total_in  = (ca.debt_issued or 0) %}
+    {% set total_in  = (ca.debt_issued or 0) + (ca.stock_issued or 0) %}
     <div class="per1k-note" style="margin-top:8px">
       Total uses: ${{ total_out }}
       {% if total_in %} + ${{ total_in }} new loans{% endif %}

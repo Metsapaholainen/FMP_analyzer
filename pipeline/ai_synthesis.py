@@ -420,14 +420,17 @@ def _build_cap_alloc(raw: dict) -> dict | None:
     debt_repay_raw = _s(cf.get("debtRepayment"))
     debt_repay = round(abs(debt_repay_raw) / ocf * 1000) if (debt_repay_raw is not None and debt_repay_raw < 0) else None
 
-    debt_issued_raw = _s(cf.get("debtIssuance") or cf.get("longTermDebtIssuance") or cf.get("commonStockIssued"))
-    # only show if it looks like a debt issuance (separate from equity issuance)
     debt_issued_raw2 = _s(cf.get("debtIssuance") or cf.get("longTermDebtIssuance"))
     debt_issued = round(debt_issued_raw2 / ocf * 1000) if (debt_issued_raw2 is not None and debt_issued_raw2 > 0) else None
 
+    # Stock issuance inflow (options exercised, secondary offerings, equity comp proceeds)
+    stock_issued_raw = _s(cf.get("commonStockIssued") or cf.get("issuanceOfCommonStock")
+                          or cf.get("proceedsFromIssuanceOfCommonStock"))
+    stock_issued = round(stock_issued_raw / ocf * 1000) if (stock_issued_raw is not None and stock_issued_raw > 0) else None
+
     # Residual → cash accumulated / other financing
     outflows = sum(v for v in [capex, acquisitions, dividends, buybacks, debt_repay] if v is not None)
-    inflows  = sum(v for v in [debt_issued] if v is not None)
+    inflows  = sum(v for v in [debt_issued, stock_issued] if v is not None)
     residual_val = round(1000 - outflows + inflows)
     residual = residual_val if abs(residual_val) > 10 else None
 
@@ -441,6 +444,7 @@ def _build_cap_alloc(raw: dict) -> dict | None:
         "buybacks": buybacks,
         "debt_repay": debt_repay,
         "debt_issued": debt_issued,
+        "stock_issued": stock_issued,
         "residual": residual,
     }
 
