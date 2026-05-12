@@ -411,10 +411,18 @@ def _build_cap_alloc(raw: dict) -> dict | None:
         return round(x / ocf * 1000) if x is not None else None
 
     capex       = pa(cf.get("capitalExpenditure"))
+
+    # Acquisitions = outflow (acquisitionsNet < 0); divestitures = inflow (> 0)
     acquisitions_raw = _s(cf.get("acquisitionsNet"))
-    acquisitions = round(abs(acquisitions_raw) / ocf * 1000) if (acquisitions_raw is not None and acquisitions_raw < 0) else None
+    acquisitions  = round(abs(acquisitions_raw) / ocf * 1000) if (acquisitions_raw is not None and acquisitions_raw < 0) else None
+    divestitures  = round(acquisitions_raw / ocf * 1000) if (acquisitions_raw is not None and acquisitions_raw > 0) else None
+
     dividends   = pa(cf.get("dividendsPaid"))
     buybacks    = pa(cf.get("commonStockRepurchased"))
+
+    # SBC — non-cash but a real dilution cost; show as a note alongside buybacks
+    sbc_raw = _s(cf.get("stockBasedCompensation"))
+    sbc = round(sbc_raw / ocf * 1000) if (sbc_raw is not None and sbc_raw > 0) else None
 
     # Debt: repayment (outflow) and new issuance (inflow) shown separately
     debt_repay_raw = _s(cf.get("debtRepayment"))
@@ -430,7 +438,7 @@ def _build_cap_alloc(raw: dict) -> dict | None:
 
     # Residual → cash accumulated / other financing
     outflows = sum(v for v in [capex, acquisitions, dividends, buybacks, debt_repay] if v is not None)
-    inflows  = sum(v for v in [debt_issued, stock_issued] if v is not None)
+    inflows  = sum(v for v in [debt_issued, stock_issued, divestitures] if v is not None)
     residual_val = round(1000 - outflows + inflows)
     residual = residual_val if abs(residual_val) > 10 else None
 
@@ -440,13 +448,125 @@ def _build_cap_alloc(raw: dict) -> dict | None:
         "ocf_b": round(ocf / 1e9, 1),
         "capex": capex,
         "acquisitions": acquisitions,
+        "divestitures": divestitures,
         "dividends": dividends,
         "buybacks": buybacks,
+        "sbc": sbc,
         "debt_repay": debt_repay,
         "debt_issued": debt_issued,
         "stock_issued": stock_issued,
         "residual": residual,
     }
+
+
+def _build_margin_trend(raw: dict) -> list[dict] | None:
+    """7-year trend of key margin + ROIC figures for moat durability check."""
+    income_a = raw.get("income_annual") or []
+    cf_a     = raw.get("cashflow_annual") or []
+    bal_a    = raw.get("balance_annual") or []
+    if not income_a:
+        return None
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    def pct(num, denom):
+        n, d = _s(num), _s(denom)
+        return round(n / d * 100, 1) if (n is not None and d) else None
+
+    cf_by_year  = {str(c.get("calendarYear") or (c.get("date") or "")[:4]): c for c in cf_a  if c.get("calendarYear") or c.get("date")}
+    bal_by_year = {str(b.get("calendarYear") or (b.get("date") or "")[:4]): b for b in bal_a if b.get("calendarYear") or b.get("date")}
+
+    rows = []
+    for inc in income_a[:8]:
+        year = str(inc.get("calendarYear") or (inc.get("date") or "")[:4] or "")
+        if not year:
+            continue
+        rev = _s(inc.get("revenue"))
+        if not rev or rev <= 0:
+            continue
+        cf  = cf_by_year.get(year, {})
+        bal = bal_by_year.get(year, {})
+
+        gross_m = pct(inc.get("grossProfit"), rev)
+        op_m    = pct(inc.get("operatingIncome"), rev)
+        net_m   = pct(inc.get("netIncome"), rev)
+        fcf_m   = pct(cf.get("freeCashFlow"), rev)
+
+        roic = None
+        op_inc  = _s(inc.get("operatingIncome"))
+        pretax  = _s(inc.get("incomeBeforeTax") or inc.get("pretaxIncome"))
+        tax_exp = _s(inc.get("incomeTaxExpense"))
+        if op_inc is not None and bal:
+            tax_rate = 0.21
+            if pretax and pretax != 0 and tax_exp is not None:
+                tax_rate = max(0.0, min(0.40, tax_exp / pretax))
+            nopat = op_inc * (1 - tax_rate)
+            eq   = _s(bal.get("totalStockholdersEquity") or bal.get("totalEquity"))
+            debt = _s(bal.get("totalDebt") or bal.get("longTermDebt"))
+            cash = _s(bal.get("cashAndCashEquivalents") or bal.get("cashAndShortTermInvestments"))
+            if eq is not None:
+                ic = (eq or 0) + (debt or 0) - (cash or 0)
+                if ic > 0:
+                    roic = round(nopat / ic * 100, 1)
+
+        rows.append({"year": year, "gross_m": gross_m, "op_m": op_m,
+                     "net_m": net_m, "fcf_m": fcf_m, "roic": roic})
+    return rows or None
+
+
+def _build_earnings_quality(raw: dict) -> list[dict] | None:
+    """5-year FCF vs Net Income comparison with quality ratio and SBC context."""
+    income_a = raw.get("income_annual") or []
+    cf_a     = raw.get("cashflow_annual") or []
+    if not income_a:
+        return None
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    cf_by_year = {str(c.get("calendarYear") or (c.get("date") or "")[:4]): c for c in cf_a if c.get("calendarYear") or c.get("date")}
+
+    rows = []
+    for inc in income_a[:6]:
+        year = str(inc.get("calendarYear") or (inc.get("date") or "")[:4] or "")
+        if not year:
+            continue
+        ni  = _s(inc.get("netIncome"))
+        cf  = cf_by_year.get(year, {})
+        fcf = _s(cf.get("freeCashFlow"))
+        sbc = _s(cf.get("stockBasedCompensation"))
+        ocf = _s(cf.get("operatingCashFlow"))
+
+        ratio = round(fcf / ni, 2) if (ni and ni > 0 and fcf is not None) else None
+        if ratio is None:
+            quality = "loss" if (ni is not None and ni < 0) else "n/a"
+        elif ratio >= 1.1:  quality = "great"
+        elif ratio >= 0.8:  quality = "good"
+        elif ratio >= 0.6:  quality = "warn"
+        else:               quality = "bad"
+
+        # SBC as % of net income — high ratio means dilution eats into shareholder value
+        sbc_ni_pct = round(sbc / ni * 100) if (sbc and ni and ni > 0) else None
+
+        rows.append({
+            "year": year,
+            "ni_b":  round(ni  / 1e9, 1) if ni  is not None else None,
+            "fcf_b": round(fcf / 1e9, 1) if fcf is not None else None,
+            "sbc_b": round(sbc / 1e9, 1) if sbc is not None else None,
+            "sbc_ni_pct": sbc_ni_pct,
+            "ratio": ratio,
+            "quality": quality,
+        })
+    return rows or None
 
 
 def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
@@ -677,8 +797,10 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
 
     filled = sum(1 for v in result.values() if v)
     log.info("Step4 parsed %d/6 sections for %s", filled, ticker)
-    result["_per1000"] = per1000
-    result["_cap_alloc"] = _build_cap_alloc(raw) if raw else None
+    result["_per1000"]         = per1000
+    result["_cap_alloc"]       = _build_cap_alloc(raw)       if raw else None
+    result["_margin_trend"]    = _build_margin_trend(raw)    if raw else None
+    result["_earnings_quality"]= _build_earnings_quality(raw) if raw else None
     return result
 
 

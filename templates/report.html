@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=10">
+<link rel="stylesheet" href="/static/style.css?v=11">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -512,6 +512,68 @@
 </section>
 {% endif %}
 
+<!-- MOAT DURABILITY — MARGIN TREND -->
+{% set mt = report.ai_step4._margin_trend if report.ai_step4 else none %}
+{% if mt %}
+{% macro mc(v, t1, t2, t3) -%}
+  {%- if v is none -%}
+  {%- elif v >= t1 -%}great{%- elif v >= t2 -%}good{%- elif v >= t3 -%}warn{%- else -%}bad{%- endif -%}
+{%- endmacro %}
+<section class="card">
+  <h2>Moat durability — margin trend</h2>
+  <p class="sub">Stable or expanding margins over many years = durable competitive advantage. Compression = moat erosion. <em>Pat Dorsey: "The best moats show up in the numbers."</em></p>
+  <div class="tablewrap">
+  <table class="trend-table">
+    <thead><tr>
+      <th>Year</th><th>Gross margin</th><th>Op margin</th><th>FCF margin</th><th>Net margin</th><th>ROIC (approx)</th>
+    </tr></thead>
+    <tbody>
+    {% for row in mt %}
+    <tr>
+      <th>{{ row.year }}</th>
+      <td class="qval {{ mc(row.gross_m, 50, 30, 15) }}">{{ row.gross_m ~ '%' if row.gross_m is not none else '—' }}</td>
+      <td class="qval {{ mc(row.op_m,    20, 12,  5) }}">{{ row.op_m    ~ '%' if row.op_m    is not none else '—' }}</td>
+      <td class="qval {{ mc(row.fcf_m,   20, 12,  5) }}">{{ row.fcf_m   ~ '%' if row.fcf_m   is not none else '—' }}</td>
+      <td class="qval {{ mc(row.net_m,   15,  8,  3) }}">{{ row.net_m   ~ '%' if row.net_m   is not none else '—' }}</td>
+      <td class="qval {{ mc(row.roic,    20, 12,  8) }}">{{ row.roic    ~ '%' if row.roic    is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint" style="margin-top:6px">Color bands — <span class="qval great" style="padding:1px 5px;border-radius:3px">≥high</span> <span class="qval good" style="padding:1px 5px;border-radius:3px">good</span> <span class="qval warn" style="padding:1px 5px;border-radius:3px">watch</span> <span class="qval bad" style="padding:1px 5px;border-radius:3px">weak</span> · Gross ≥50/30/15% · Op/FCF ≥20/12/5% · Net ≥15/8/3% · ROIC ≥20/12/8%</p>
+</section>
+{% endif %}
+
+<!-- EARNINGS QUALITY -->
+{% set eq = report.ai_step4._earnings_quality if report.ai_step4 else none %}
+{% if eq %}
+<section class="card">
+  <h2>Earnings quality — FCF vs net income</h2>
+  <p class="sub">High-quality earnings are backed by cash. FCF/NI &gt; 1.1× = excellent; &lt; 0.7× = investigate accruals. SBC shown separately as it dilutes shareholders even when non-cash.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr>
+      <th>Year</th><th>Net income</th><th>Free cash flow</th><th>FCF / NI</th><th>SBC (dilution)</th><th>SBC % of NI</th><th>Quality</th>
+    </tr></thead>
+    <tbody>
+    {% for row in eq %}
+    <tr>
+      <th>{{ row.year }}</th>
+      <td>${{ row.ni_b }}B</td>
+      <td class="qval {{ row.quality }}">${{ row.fcf_b }}B</td>
+      <td class="qval {{ row.quality }}">{{ row.ratio ~ '×' if row.ratio is not none else '—' }}</td>
+      <td style="color:#c084fc">${{ row.sbc_b }}B</td>
+      <td class="{{ 'warn' if row.sbc_ni_pct and row.sbc_ni_pct > 30 else 'good' if row.sbc_ni_pct else '' }}">{{ row.sbc_ni_pct ~ '%' if row.sbc_ni_pct is not none else '—' }}</td>
+      <td><span class="sev sev-{{ 'low' if row.quality == 'great' else 'medium' if row.quality == 'good' else 'high' if row.quality in ('bad','loss') else 'medium' }}">{{ row.quality }}</span></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
 <!-- CEO / CAPITAL ALLOCATION -->
 {% if report.ceo %}
 <section class="card">
@@ -573,9 +635,31 @@
       {% endif %}
     {% endfor %}
 
+    {# SBC — non-cash dilution note (shown after buybacks for context) #}
+    {% if ca.sbc and ca.sbc > 0 %}
+    <div class="per1k-row per1k-derived" style="margin-top:2px">
+      <span class="per1k-label" style="color:#c084fc">SBC (stock comp dilution)</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ ((ca.sbc / 10) | round(1)) }}%;background:#c084fc;opacity:0.5"></div>
+      </div>
+      <span class="per1k-val" style="color:#c084fc">${{ ca.sbc }}</span>
+      <span class="per1k-subtext">non-cash; reduces net buyback impact (net return = buybacks − SBC)</span>
+    </div>
+    {% endif %}
+
     {# Inflows — cash sources beyond OCF #}
-    {% if (ca.debt_issued and ca.debt_issued > 0) or (ca.stock_issued and ca.stock_issued > 0) %}
+    {% if (ca.debt_issued and ca.debt_issued > 0) or (ca.stock_issued and ca.stock_issued > 0) or (ca.divestitures and ca.divestitures > 0) %}
     <div class="per1k-divider"></div>
+    {% if ca.divestitures and ca.divestitures > 0 %}
+    <div class="per1k-row">
+      <span class="per1k-label" style="color:#fbbf24">+ Asset / business sales</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ ((ca.divestitures / 10) | round(1)) }}%;background:#fbbf24;opacity:0.7"></div>
+      </div>
+      <span class="per1k-val" style="color:#fbbf24">+${{ ca.divestitures }}</span>
+      <span class="per1k-subtext">divestiture proceeds (net acquisitionsNet positive)</span>
+    </div>
+    {% endif %}
     {% if ca.debt_issued and ca.debt_issued > 0 %}
     <div class="per1k-row">
       <span class="per1k-label" style="color:var(--warn)">+ New loans / debt raised</span>
@@ -623,7 +707,7 @@
 
     {# Footer: make the arithmetic explicit #}
     {% set total_out = (ca.capex or 0) + (ca.acquisitions or 0) + (ca.dividends or 0) + (ca.buybacks or 0) + (ca.debt_repay or 0) %}
-    {% set total_in  = (ca.debt_issued or 0) + (ca.stock_issued or 0) %}
+    {% set total_in  = (ca.debt_issued or 0) + (ca.stock_issued or 0) + (ca.divestitures or 0) %}
     <div class="per1k-note" style="margin-top:8px">
       Total uses: ${{ total_out }}
       {% if total_in %} + ${{ total_in }} new loans{% endif %}

@@ -416,6 +416,15 @@ button:hover { filter: brightness(1.05); }
 /* ---- Capital allocation chart ---- */
 .capalloc-grid { display: flex; flex-direction: column; gap: 6px; }
 
+/* ---- Margin trend / earnings quality tables ---- */
+.trend-table th:first-child { width: 60px; }
+.trend-table td { text-align: center; min-width: 90px; }
+.qval.great { color: var(--good); }
+.qval.good  { color: #86efac; }
+.qval.warn  { color: var(--warn); }
+.qval.bad   { color: var(--bad); }
+.qval.n\/a, .qval.loss { color: var(--mute); }
+
 /* ---- Segment growth bar chart (Growth pillar) ---- */
 .seg-breakdown {
   margin-top: 12px;
