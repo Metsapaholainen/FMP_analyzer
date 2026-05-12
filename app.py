@@ -152,7 +152,8 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
     red_flags = detect_red_flags(raw, fundamentals)
     fundamental_analysis = build_fundamental_analysis(fundamentals, red_flags, ceo, competition, raw=raw)
     ai_step4 = synthesize_step4(fundamental_analysis, fundamentals["snapshot"],
-                                raw=raw, competition=competition, red_flags=red_flags)
+                                raw=raw, competition=competition, red_flags=red_flags,
+                                fundamentals=fundamentals)
     ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
                     moat_hypothesis=moat_hypothesis.strip(), raw=raw,
                     competition=competition,

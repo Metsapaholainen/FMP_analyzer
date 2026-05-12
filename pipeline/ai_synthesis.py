@@ -560,6 +560,174 @@ def _build_growth_quality(raw: dict) -> list[dict] | None:
     return results or None
 
 
+def _build_balance_sheet_viz(raw: dict, fundamentals: dict | None) -> dict | None:
+    """Per-$1,000-total-assets balance sheet composition + fortress metrics."""
+    bal_a = raw.get("balance_annual") or []
+    if not bal_a:
+        return None
+    bal = bal_a[0]
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    total_assets = _s(bal.get("totalAssets"))
+    if not total_assets or total_assets <= 0:
+        return None
+
+    def pa(v):
+        x = _s(v)
+        return round(x / total_assets * 1000) if x is not None else None
+
+    # ── Asset composition ─────────────────────────────────────────────────────
+    cash   = pa(bal.get("cashAndCashEquivalents") or bal.get("cashAndShortTermInvestments"))
+    ar     = pa(bal.get("netReceivables") or bal.get("accountsReceivable"))
+    inv    = pa(bal.get("inventory"))
+    ppe    = pa(bal.get("propertyPlantEquipmentNet"))
+    gw     = _s(bal.get("goodwill") or 0)
+    ia     = _s(bal.get("intangibleAssets") or 0)
+    gw_ia  = round((gw + ia) / total_assets * 1000) if (gw + ia) > 0 else None
+
+    known_assets = sum(v for v in [cash, ar, inv, ppe, gw_ia] if v is not None)
+    other_assets_val = round(1000 - known_assets)
+    other_assets = other_assets_val if other_assets_val > 10 else None
+
+    # ── Financing structure ───────────────────────────────────────────────────
+    cl    = pa(bal.get("totalCurrentLiabilities"))
+    ltd   = pa(bal.get("longTermDebt") or bal.get("longTermDebtNoncurrent"))
+    tl    = _s(bal.get("totalLiabilities"))
+    eq_raw = _s(bal.get("totalStockholdersEquity") or bal.get("totalEquity"))
+    equity = round(eq_raw / total_assets * 1000) if (eq_raw is not None and eq_raw > 0) else None
+
+    # Other liabilities = total_liabilities - current_liabilities - long_term_debt
+    other_liab = None
+    if tl is not None:
+        cl_raw  = _s(bal.get("totalCurrentLiabilities")) or 0
+        ltd_raw = _s(bal.get("longTermDebt") or bal.get("longTermDebtNoncurrent")) or 0
+        other_l = tl - cl_raw - ltd_raw
+        other_liab = round(other_l / total_assets * 1000) if other_l > 0 else None
+
+    # ── Fortress metrics ──────────────────────────────────────────────────────
+    snap    = (fundamentals or {}).get("snapshot") or {}
+    metrics = (fundamentals or {}).get("metrics") or {}
+
+    total_debt = _s(snap.get("total_debt")) or _s(bal.get("totalDebt")) or 0
+    cash_val   = _s(snap.get("cash_and_equivalents")) or _s(bal.get("cashAndCashEquivalents") or bal.get("cashAndShortTermInvestments")) or 0
+    net_debt   = total_debt - cash_val
+
+    if net_debt < 0:
+        nd_label = f"${abs(net_debt)/1e9:.1f}B net cash"
+    else:
+        nd_label = f"${net_debt/1e9:.1f}B net debt"
+
+    ebitda = _s(snap.get("ebitda_ttm"))
+    nd_ebitda, nd_ebitda_label, nd_ebitda_q = None, "N/A", "bad"
+    if ebitda and ebitda > 0:
+        nd_ebitda = round(net_debt / ebitda, 2)
+        nd_ebitda_label = f"{nd_ebitda:.1f}×" if nd_ebitda >= 0 else f"−{abs(nd_ebitda):.1f}× (net cash)"
+        if nd_ebitda <= 0:    nd_ebitda_q = "great"
+        elif nd_ebitda <= 1.5: nd_ebitda_q = "good"
+        elif nd_ebitda <= 3.0: nd_ebitda_q = "warn"
+        else:                  nd_ebitda_q = "bad"
+
+    def _metric(key):
+        m = metrics.get(key) or {}
+        return m.get("current"), m.get("quality") or ""
+
+    cr, cr_q   = _metric("current_ratio")
+    ic, ic_q   = _metric("interest_coverage")
+    az         = _s(snap.get("altman_z_score"))
+    az_q       = ("great" if az and az >= 3.0 else "good" if az and az >= 2.0
+                  else "warn" if az and az >= 1.8 else "bad") if az is not None else ""
+    pf         = snap.get("piotroski_score")
+    pf_q       = ("great" if pf and pf >= 7 else "good" if pf and pf >= 5
+                  else "warn" if pf and pf >= 3 else "bad") if pf is not None else ""
+
+    year = str(bal.get("calendarYear") or (bal.get("date") or "")[:4] or "")
+    return {
+        "year": year,
+        "total_assets_b": round(total_assets / 1e9, 1),
+        "assets": {
+            "cash": cash, "receivables": ar, "inventory": inv,
+            "ppe": ppe, "goodwill_intangibles": gw_ia, "other_assets": other_assets,
+        },
+        "financing": {
+            "current_liabilities": cl, "long_term_debt": ltd,
+            "other_liabilities": other_liab, "equity": equity,
+        },
+        "fortress": {
+            "net_debt": net_debt, "net_debt_label": nd_label,
+            "net_debt_ebitda": nd_ebitda, "net_debt_ebitda_label": nd_ebitda_label,
+            "net_debt_ebitda_quality": nd_ebitda_q,
+            "current_ratio": cr, "current_ratio_quality": cr_q,
+            "interest_coverage": ic, "interest_coverage_quality": ic_q,
+            "altman_z": az, "altman_z_quality": az_q,
+            "piotroski": pf, "piotroski_quality": pf_q,
+        },
+    }
+
+
+def _build_net_debt_trend(raw: dict, fundamentals: dict | None) -> list[dict] | None:
+    """5-year net debt and ND/EBITDA trend from annual balance sheet + income data."""
+    bal_a    = raw.get("balance_annual") or []
+    income_a = raw.get("income_annual") or []
+    cf_a     = raw.get("cashflow_annual") or []
+    if len(bal_a) < 2:
+        return None
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    inc_by_year = {str(i.get("calendarYear") or (i.get("date") or "")[:4]): i for i in income_a if i.get("calendarYear") or i.get("date")}
+    cf_by_year  = {str(c.get("calendarYear") or (c.get("date") or "")[:4]): c for c in cf_a  if c.get("calendarYear") or c.get("date")}
+
+    rows = []
+    for bal in bal_a[:6]:
+        year = str(bal.get("calendarYear") or (bal.get("date") or "")[:4] or "")
+        if not year:
+            continue
+        total_debt = _s(bal.get("totalDebt")) or 0
+        cash       = _s(bal.get("cashAndCashEquivalents") or bal.get("cashAndShortTermInvestments")) or 0
+        net_debt   = total_debt - cash
+
+        # EBITDA: try income statement, fallback to operating income + D&A
+        inc = inc_by_year.get(year, {})
+        cf  = cf_by_year.get(year, {})
+        ebitda = _s(inc.get("ebitda"))
+        if not ebitda:
+            op_inc = _s(inc.get("operatingIncome"))
+            da     = _s(cf.get("depreciationAndAmortization"))
+            if op_inc is not None and da is not None:
+                ebitda = op_inc + da
+
+        nd_ebitda, nd_q = None, ""
+        if ebitda and ebitda > 0:
+            nd_ebitda = round(net_debt / ebitda, 1)
+            if nd_ebitda <= 0:     nd_q = "great"
+            elif nd_ebitda <= 1.5: nd_q = "good"
+            elif nd_ebitda <= 3.0: nd_q = "warn"
+            else:                  nd_q = "bad"
+
+        rows.append({
+            "year": year,
+            "total_debt_b": round(total_debt / 1e9, 1),
+            "cash_b":       round(cash / 1e9, 1),
+            "net_debt_b":   round(net_debt / 1e9, 1),
+            "ebitda_b":     round(ebitda / 1e9, 1) if ebitda else None,
+            "nd_ebitda":    nd_ebitda,
+            "nd_ebitda_quality": nd_q,
+        })
+
+    return rows or None
+
+
 def _build_cap_alloc(raw: dict) -> dict | None:
     """Per-$1,000-OCF capital allocation breakdown from the most recent annual filing."""
     cf_a = raw.get("cashflow_annual") or []
@@ -748,7 +916,8 @@ def _build_earnings_quality(raw: dict) -> list[dict] | None:
 def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
                      raw: dict | None = None,
                      competition: dict | None = None,
-                     red_flags: list | None = None) -> dict:
+                     red_flags: list | None = None,
+                     fundamentals: dict | None = None) -> dict:
     """Focused Haiku call writing specific analyst commentary for each pillar.
     Receives full context (segments, news, peers, description) so it can name
     actual products, acquisitions, and competitor comparisons."""
@@ -974,10 +1143,12 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     filled = sum(1 for v in result.values() if v)
     log.info("Step4 parsed %d/6 sections for %s", filled, ticker)
     result["_per1000"]          = per1000
-    result["_cap_alloc"]        = _build_cap_alloc(raw)        if raw else None
-    result["_margin_trend"]     = _build_margin_trend(raw)     if raw else None
-    result["_earnings_quality"] = _build_earnings_quality(raw) if raw else None
-    result["_growth_quality"]   = _build_growth_quality(raw)   if raw else None
+    result["_cap_alloc"]        = _build_cap_alloc(raw)                         if raw else None
+    result["_margin_trend"]     = _build_margin_trend(raw)                      if raw else None
+    result["_earnings_quality"] = _build_earnings_quality(raw)                  if raw else None
+    result["_growth_quality"]   = _build_growth_quality(raw)                    if raw else None
+    result["_balance_sheet"]    = _build_balance_sheet_viz(raw, fundamentals)   if raw else None
+    result["_net_debt_trend"]   = _build_net_debt_trend(raw, fundamentals)      if raw else None
     return result
 
 

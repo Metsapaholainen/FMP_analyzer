@@ -416,6 +416,36 @@ button:hover { filter: brightness(1.05); }
 /* ---- Capital allocation chart ---- */
 .capalloc-grid { display: flex; flex-direction: column; gap: 6px; }
 
+/* ---- Balance sheet fortress metrics strip ---- */
+.bs-fortress-strip {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+@media (min-width: 500px)  { .bs-fortress-strip { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 800px)  { .bs-fortress-strip { grid-template-columns: repeat(6, 1fr); } }
+.bs-fortress-cell {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.bs-fortress-label {
+  color: var(--mute);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.bs-fortress-val { font-size: 1.0rem; font-weight: 700; color: var(--fg); }
+.bs-fortress-val.great { color: #4ade80; }
+.bs-fortress-val.good  { color: #86efac; }
+.bs-fortress-val.warn  { color: var(--warn); }
+.bs-fortress-val.bad   { color: var(--bad); }
+
 /* ---- Margin trend / earnings quality tables ---- */
 .trend-table th:first-child { width: 60px; }
 .trend-table td { text-align: center; min-width: 90px; }

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=12">
+<link rel="stylesheet" href="/static/style.css?v=13">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -721,6 +721,125 @@
       {% if ca.year %}&nbsp;·&nbsp; FY{{ ca.year }}{% endif %}
     </div>
   </div>
+</section>
+{% endif %}
+
+<!-- FINANCIAL FOUNDATION — BALANCE SHEET -->
+{% set bs  = report.ai_step4._balance_sheet  if report.ai_step4 else none %}
+{% set ndt = report.ai_step4._net_debt_trend if report.ai_step4 else none %}
+{% if bs %}
+<section class="card">
+  <h2>Financial foundation — balance sheet</h2>
+  <p class="sub">What does the company own and how is it financed? Both charts are per $1,000 of total assets{% if bs.year %} · FY{{ bs.year }}{% endif %}{% if bs.total_assets_b %} · total ${{ bs.total_assets_b }}B{% endif %}</p>
+
+  <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">What does the company own?</h3>
+  <div class="per1k-grid" style="margin-bottom:18px">
+    {% set asset_rows = [
+      ("Cash &amp; investments",       bs.assets.cash,                "#2dd4bf"),
+      ("Receivables",                   bs.assets.receivables,         "#60a5fa"),
+      ("Inventory",                     bs.assets.inventory,           "#f59e0b"),
+      ("PP&amp;E (tangible assets)",    bs.assets.ppe,                 "#f97316"),
+      ("Goodwill &amp; intangibles",    bs.assets.goodwill_intangibles,"#a78bfa"),
+      ("Other assets",                  bs.assets.other_assets,        "#64748b"),
+    ] %}
+    {% for label, val, color in asset_rows %}
+      {% if val is not none and val > 0 %}
+      <div class="per1k-row">
+        <span class="per1k-label">{{ label }}</span>
+        <div class="per1k-bar-wrap">
+          <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
+        </div>
+        <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
+      </div>
+      {% endif %}
+    {% endfor %}
+    <div class="per1k-note">Per $1,000 total assets · rows sum to ~$1,000</div>
+  </div>
+
+  <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">How is it financed?</h3>
+  <div class="per1k-grid" style="margin-bottom:18px">
+    {% set fin_rows = [
+      ("Current liabilities",      bs.financing.current_liabilities, "#f87171"),
+      ("Long-term debt",           bs.financing.long_term_debt,      "#ef4444"),
+      ("Other liabilities",        bs.financing.other_liabilities,   "#94a3b8"),
+      ("Shareholders' equity",     bs.financing.equity,              "var(--good)"),
+    ] %}
+    {% for label, val, color in fin_rows %}
+      {% if val is not none and val > 0 %}
+      <div class="per1k-row">
+        <span class="per1k-label">{{ label }}</span>
+        <div class="per1k-bar-wrap">
+          <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
+        </div>
+        <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
+      </div>
+      {% endif %}
+    {% endfor %}
+    <div class="per1k-note">Per $1,000 total assets · liabilities + equity = total assets{% if bs.financing.equity is none or bs.financing.equity <= 0 %} · <span style="color:var(--warn)">negative equity (heavy buyback / leverage)</span>{% endif %}</div>
+  </div>
+
+  {% set ft = bs.fortress %}
+  <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">Fortress metrics</h3>
+  <div class="bs-fortress-strip">
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Net debt position</span>
+      <strong class="bs-fortress-val {{ 'great' if ft.net_debt is not none and ft.net_debt < 0 else 'warn' if ft.net_debt is not none and ft.net_debt > 0 else '' }}">{{ ft.net_debt_label or '—' }}</strong>
+    </div>
+    {% if ft.net_debt_ebitda is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Net debt / EBITDA</span>
+      <strong class="bs-fortress-val {{ ft.net_debt_ebitda_quality }}">{{ ft.net_debt_ebitda_label }}</strong>
+    </div>
+    {% endif %}
+    {% if ft.current_ratio is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Current ratio</span>
+      <strong class="bs-fortress-val {{ ft.current_ratio_quality }}">{{ "%.2f"|format(ft.current_ratio) }}×</strong>
+    </div>
+    {% endif %}
+    {% if ft.interest_coverage is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Interest coverage</span>
+      <strong class="bs-fortress-val {{ ft.interest_coverage_quality }}">{{ "%.1f"|format(ft.interest_coverage) }}×</strong>
+    </div>
+    {% endif %}
+    {% if ft.altman_z is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Altman Z-score</span>
+      <strong class="bs-fortress-val {{ ft.altman_z_quality }}">{{ "%.2f"|format(ft.altman_z) }}</strong>
+    </div>
+    {% endif %}
+    {% if ft.piotroski is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Piotroski F-score</span>
+      <strong class="bs-fortress-val {{ ft.piotroski_quality }}">{{ ft.piotroski }}/9</strong>
+    </div>
+    {% endif %}
+  </div>
+  <p class="hint" style="margin-top:4px">ND/EBITDA: ≤0× net cash · ≤1.5× good · ≤3× watch · &gt;3× levered &nbsp;·&nbsp; Altman Z: ≥3.0 safe · ≥1.8 grey zone · &lt;1.8 distress &nbsp;·&nbsp; Piotroski: ≥7 strong · ≥5 ok · &lt;3 weak</p>
+
+  {% if ndt and ndt | length >= 2 %}
+  <h3 style="margin:16px 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">Leverage trend (5Y)</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Year</th><th>Total debt</th><th>Cash</th><th>Net debt</th><th>EBITDA</th><th>ND / EBITDA</th></tr></thead>
+    <tbody>
+    {% for row in ndt %}
+    <tr>
+      <th>{{ row.year }}</th>
+      <td>${{ row.total_debt_b }}B</td>
+      <td>${{ row.cash_b }}B</td>
+      <td class="qval {{ 'great' if row.net_debt_b < 0 else 'warn' if row.net_debt_b > 2 else 'good' }}">
+        {{ '$' ~ (row.net_debt_b | abs) ~ 'B net cash' if row.net_debt_b < 0 else '$' ~ row.net_debt_b ~ 'B' }}
+      </td>
+      <td>{{ '$' ~ row.ebitda_b ~ 'B' if row.ebitda_b is not none else '—' }}</td>
+      <td class="qval {{ row.nd_ebitda_quality }}">{{ row.nd_ebitda ~ '×' if row.nd_ebitda is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
 </section>
 {% endif %}
 
