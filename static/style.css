@@ -397,7 +397,13 @@ button:hover { filter: brightness(1.05); }
 .per1k-note { font-size: 0.72rem; color: var(--mute); margin-top: 4px; }
 .per1k-divider { border-top: 1px dashed var(--border); margin: 4px 0; }
 .per1k-derived .per1k-label { color: var(--mute); }
-.per1k-derived-note { font-size: 0.72rem; color: var(--mute); font-weight: 400; }
+.per1k-subtext {
+  grid-column: 1 / -1;
+  font-size: 0.71rem;
+  color: var(--mute);
+  margin-top: -2px;
+  padding-bottom: 2px;
+}
 .biz-model-text {
   margin: 0;
   font-size: 0.9rem;
