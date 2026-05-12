@@ -187,7 +187,12 @@ def _pillar_financial_health(fundamentals: dict) -> dict:
         {"label": "Piotroski F-score",   "value": f"{int(piotroski)}/9" if piotroski is not None else "—", "note": "earnings quality & balance sheet signal"},
         {"label": "Altman Z-score",       "value": alt_note,             "note": "bankruptcy risk indicator"},
         {"label": "Interest coverage",    "value": _pct_fmt(None) if ic_band.get("current") is None else f"{_safe(ic_band.get('current')):.1f}x", "note": f"quality: {ic_band.get('quality') or '—'}"},
-        {"label": "Debt / equity",        "value": f"{_safe(de_band.get('current')):.2f}x" if _safe(de_band.get('current')) is not None else "—", "note": f"quality: {de_band.get('quality') or '—'}"},
+        {"label": "Debt / equity",        "value": f"{_safe(de_band.get('current')):.2f}x" if _safe(de_band.get('current')) is not None else "—",
+         "note": (
+             "negative book equity — buybacks exceed retained earnings (not a net-cash signal)"
+             if (_safe(de_band.get("current")) or 0) < 0
+             else f"quality: {de_band.get('quality') or '—'}"
+         )},
     ]
 
     verdict = _verdict_from_pct(score / max_pts, [

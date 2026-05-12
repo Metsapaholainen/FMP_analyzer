@@ -409,7 +409,25 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         )
         pillar_lines.append(f"{key.upper()}: {pts_pct}\n  {data_pts}")
 
+    # Warn AI about negative D/E misinterpretation (common for buyback-heavy companies)
+    fin_health = (fundamental_analysis.get("pillars") or {}).get("financial_health") or {}
+    de_pt = next((pt for pt in (fin_health.get("points") or []) if pt.get("label") == "Debt / equity"), None)
+    de_val = None
+    if de_pt:
+        try:
+            de_val = float((de_pt.get("value") or "").replace("x", ""))
+        except ValueError:
+            pass
+
     context_block = ""
+    if de_val is not None and de_val < 0:
+        context_block += (
+            "IMPORTANT ACCOUNTING NOTE: This company has a NEGATIVE debt/equity ratio. "
+            "This does NOT mean it holds more cash than debt. It means book equity is negative "
+            "because cumulative share buybacks have exceeded retained earnings — a sign of "
+            "aggressive capital return, not financial weakness. Judge balance sheet health from "
+            "interest coverage and Altman Z-score instead.\n\n"
+        )
     if desc:
         context_block += f"BUSINESS: {desc}\n\n"
     if seg_lines:
