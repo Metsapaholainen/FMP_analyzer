@@ -608,6 +608,22 @@
     </div>
     {% endif %}
     {% endif %}
+
+    {# Footer: make the arithmetic explicit #}
+    {% set total_out = (ca.capex or 0) + (ca.acquisitions or 0) + (ca.dividends or 0) + (ca.buybacks or 0) + (ca.debt_repay or 0) %}
+    {% set total_in  = (ca.debt_issued or 0) %}
+    <div class="per1k-note" style="margin-top:8px">
+      Total uses: ${{ total_out }}
+      {% if total_in %} + ${{ total_in }} new loans{% endif %}
+      &nbsp;·&nbsp;
+      OCF covers $1,000
+      {% if ca.residual and ca.residual < 0 %}
+        &nbsp;·&nbsp; gap of ${{ ca.residual | abs }} funded by debt / cash reserves
+      {% elif ca.residual and ca.residual > 0 %}
+        &nbsp;·&nbsp; ${{ ca.residual }} surplus added to cash balance
+      {% endif %}
+      {% if ca.year %}&nbsp;·&nbsp; FY{{ ca.year }}{% endif %}
+    </div>
   </div>
 </section>
 {% endif %}
