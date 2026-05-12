@@ -301,7 +301,7 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         client = anthropic.Anthropic()
         msg = client.messages.create(
             model=MODEL,
-            max_tokens=900,
+            max_tokens=2000,
             temperature=0.2,  # low temp = more consistent, less hallucination
             messages=[{"role": "user", "content": prompt}],
         )
@@ -482,7 +482,7 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         client = anthropic.Anthropic()
         msg = client.messages.create(
             model=MODEL,
-            max_tokens=1400,
+            max_tokens=2000,
             temperature=0.2,
             messages=[{"role": "user", "content": prompt}],
         )
