@@ -327,10 +327,13 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
 _STEP4_PILLARS = ["growth", "profitability", "financial_health", "risks", "management"]
 
 
-def synthesize_step4(fundamental_analysis: dict, snapshot: dict) -> dict:
-    """Focused Haiku call that writes a 2-3 sentence analyst commentary for each
-    of the 5 business quality pillars. Returns dict keyed by pillar name.
-    Falls back to empty strings if AI unavailable."""
+def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
+                     raw: dict | None = None,
+                     competition: dict | None = None,
+                     red_flags: list | None = None) -> dict:
+    """Focused Haiku call writing specific analyst commentary for each pillar.
+    Receives full context (segments, news, peers, description) so it can name
+    actual products, acquisitions, and competitor comparisons."""
     empty = {k: "" for k in _STEP4_PILLARS}
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return empty
@@ -339,42 +342,110 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict) -> dict:
     except ImportError:
         return empty
 
-    pillars = fundamental_analysis.get("pillars") or {}
-    ticker  = snapshot.get("ticker") or ""
-    name    = snapshot.get("name") or ticker
-    sector  = snapshot.get("sector") or ""
+    pillars   = fundamental_analysis.get("pillars") or {}
+    ticker    = snapshot.get("ticker") or ""
+    name      = snapshot.get("name") or ticker
+    sector    = snapshot.get("sector") or ""
+    industry  = snapshot.get("industry") or ""
+    desc      = (snapshot.get("description") or "")[:600]
 
-    # Build a compact data summary for each pillar
+    # ── Segment context ──────────────────────────────────────────────────────
+    seg_lines: list[str] = []
+    top_seg = snapshot.get("top_segment")
+    if top_seg:
+        seg_lines.append(f"Largest segment: {top_seg['name']} = {top_seg.get('pct_of_total', 0)*100:.0f}% of revenue")
+    if raw:
+        prod_segs = listify(raw.get("segments_product"))
+        if prod_segs:
+            latest = prod_segs[0]
+            data = latest.get("data") if isinstance(latest.get("data"), dict) else None
+            if data is None:
+                skip = {"date", "symbol", "fiscalYear", "period", "reportedCurrency", "cik", "fillingDate"}
+                data = {k: v for k, v in latest.items() if k not in skip and isinstance(v, (int, float))}
+            if data:
+                total = sum(v for v in data.values() if v and v > 0)
+                sorted_segs = sorted(data.items(), key=lambda x: x[1] or 0, reverse=True)
+                for seg_name, seg_val in sorted_segs[:4]:
+                    if seg_val and total:
+                        seg_lines.append(f"  {seg_name}: {seg_val/total*100:.0f}% of revenue")
+
+    # ── Competition peer comparison ──────────────────────────────────────────
+    comp_note = ""
+    if competition:
+        comp_comps = competition.get("components") or {}
+        peer_comp  = comp_comps.get("peer_outperformance") or {}
+        comp_note  = peer_comp.get("note") or ""
+        peers_used = competition.get("peers_used") or list((competition.get("peer_metrics") or {}).keys())
+
+    # ── Recent news (acquisitions, guidance, key events) ─────────────────────
+    news_items: list[str] = []
+    if raw:
+        all_news = listify(raw.get("press_releases")) + listify(raw.get("stock_news"))
+        seen: set[str] = set()
+        for item in all_news[:30]:
+            title = (item.get("title") or "").strip()
+            date  = (item.get("date") or item.get("publishedDate") or "")[:10]
+            if title and title not in seen:
+                seen.add(title)
+                news_items.append(f"[{date}] {title}")
+            if len(news_items) >= 10:
+                break
+
+    # ── Red flags ────────────────────────────────────────────────────────────
+    flag_lines = [
+        f"{(f.get('severity') or '').replace('sev-','').upper()}: {f.get('title')} — {f.get('detail','')[:80]}"
+        for f in (red_flags or [])[:5]
+    ]
+
+    # ── Per-pillar score summary ──────────────────────────────────────────────
     pillar_lines = []
     for key in _STEP4_PILLARS:
         p = pillars.get(key) or {}
         pts_pct = f"{p.get('score')}/{p.get('max_score')} ({p.get('verdict')})"
         data_pts = "; ".join(
-            f"{pt['label']}: {pt['value']}" for pt in (p.get("points") or [])[:4]
-            if pt.get("value") and pt["value"] != "—"
+            f"{pt['label']}: {pt['value']} — {pt['note']}"
+            for pt in (p.get("points") or [])[:5]
+            if pt.get("value") and pt["value"] not in ("—", "")
         )
-        pillar_lines.append(f"{key.upper()}: {pts_pct}\n  Data: {data_pts}")
+        pillar_lines.append(f"{key.upper()}: {pts_pct}\n  {data_pts}")
+
+    context_block = ""
+    if desc:
+        context_block += f"BUSINESS: {desc}\n\n"
+    if seg_lines:
+        context_block += "REVENUE SEGMENTS:\n" + "\n".join(seg_lines) + "\n\n"
+    if comp_note:
+        context_block += f"PEER COMPARISON: {comp_note}\n\n"
+    if news_items:
+        context_block += "RECENT NEWS / EVENTS:\n" + "\n".join(news_items) + "\n\n"
+    if flag_lines:
+        context_block += "RED FLAGS:\n" + "\n".join(flag_lines) + "\n\n"
 
     prompt = (
-        f"You are a strict equity analyst writing a Step 4 business quality assessment for "
-        f"{ticker} ({name}), a {sector} company.\n\n"
-        f"For each pillar below write EXACTLY 2-3 sentences. Interpret what the numbers mean "
-        f"for the investor — do not just repeat the numbers. Be direct and honest. "
-        f"If a metric is weak, say so. Reference specific figures to support your point.\n\n"
-        + "\n\n".join(pillar_lines) + "\n\n"
-        "Reply in this EXACT format (pillar name in ALL CAPS on its own line, then your sentences):\n\n"
-        "GROWTH\n[your 2-3 sentences]\n\n"
-        "PROFITABILITY\n[your 2-3 sentences]\n\n"
-        "FINANCIAL_HEALTH\n[your 2-3 sentences]\n\n"
-        "RISKS\n[your 2-3 sentences]\n\n"
-        "MANAGEMENT\n[your 2-3 sentences]"
+        f"You are a strict equity analyst. Write a specific, insightful Step 4 assessment "
+        f"for {ticker} ({name}), a {sector} / {industry} company.\n\n"
+        f"{context_block}"
+        f"PILLAR SCORES:\n" + "\n\n".join(pillar_lines) + "\n\n"
+        "For EACH pillar write EXACTLY 2-3 sentences. Rules:\n"
+        "- Be specific: name actual products, segments, acquisitions, competitors\n"
+        "- Explain the WHY behind the numbers (e.g. growth driven by X acquisition, "
+        "margins sustained by Y segment, risk from Z)\n"
+        "- Reference the peer comparison or segment data when relevant\n"
+        "- If something is weak, say so directly\n"
+        "- Never use vague filler like 'the company performs well'\n\n"
+        "Reply in EXACT format:\n\n"
+        "GROWTH\n[2-3 sentences]\n\n"
+        "PROFITABILITY\n[2-3 sentences]\n\n"
+        "FINANCIAL_HEALTH\n[2-3 sentences]\n\n"
+        "RISKS\n[2-3 sentences]\n\n"
+        "MANAGEMENT\n[2-3 sentences]"
     )
 
     try:
         client = anthropic.Anthropic()
         msg = client.messages.create(
             model=MODEL,
-            max_tokens=700,
+            max_tokens=800,
             temperature=0.2,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -383,11 +454,11 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict) -> dict:
         log.warning("Step4 AI call failed: %s", e)
         return empty
 
-    # Parse: split on ALL-CAPS pillar headers
+    # Parse ALL-CAPS pillar headers
     result = dict(empty)
     current_key = None
     current_lines: list[str] = []
-    key_map = {k.upper().replace("_", "_"): k for k in _STEP4_PILLARS}
+    key_map = {k.upper(): k for k in _STEP4_PILLARS}
     key_map["FINANCIAL_HEALTH"] = "financial_health"
 
     for line in text.splitlines():
