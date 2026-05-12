@@ -137,9 +137,9 @@ def _growth_sources(fundamentals: dict, raw: dict | None) -> list[dict]:
                 header_note = f"{period_label} comparison, {n_segs} segment{'s' if n_segs != 1 else ''}"
                 if gone:
                     header_note += f"; removed: {', '.join(sorted(gone)[:2])}"
-                sources.append({"label": "Segment breakdown", "value": f"{n_segs} segments", "note": header_note})
+                sources.append({"label": "Segment breakdown", "value": f"{n_segs} segments", "note": header_note, "_seg_header": True})
                 for _, seg_name, val, note in rows:
-                    sources.append({"label": f"  {seg_name}", "value": val, "note": note})
+                    sources.append({"label": seg_name, "value": val, "note": note, "_seg_row": True})
 
     return sources
 

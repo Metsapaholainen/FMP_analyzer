@@ -487,31 +487,40 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(b.text for b in msg.content if hasattr(b, "text"))
+        log.info("Step4 raw response (%d chars): %s", len(text), text[:300].replace("\n", "\\n"))
     except Exception as e:
         log.warning("Step4 AI call failed: %s", e)
         return empty
 
-    # Parse ALL-CAPS pillar headers
+    # Parse pillar headers — robust to markdown (#, **), colons, dashes
+    import re as _re
     result = dict(empty)
     current_key = None
     current_lines: list[str] = []
     key_map = {k.upper(): k for k in _STEP4_PILLARS}
     key_map["FINANCIAL_HEALTH"] = "financial_health"
+    key_map["FINANCIAL HEALTH"] = "financial_health"
 
     for line in text.splitlines():
-        stripped = line.strip()
-        upper = stripped.replace(" ", "_")
-        if upper in key_map:
+        # Strip markdown decoration: ##, **, *, leading/trailing punctuation
+        stripped = _re.sub(r'^[#*\s]+|[#*:\s]+$', '', line).strip()
+        if not stripped:
+            continue
+        # Normalize to UPPER_CASE for matching
+        normalized = stripped.upper().replace(" ", "_").replace("-", "_")
+        if normalized in key_map:
             if current_key:
                 result[current_key] = " ".join(current_lines).strip()
-            current_key = key_map[upper]
+            current_key = key_map[normalized]
             current_lines = []
-        elif current_key and stripped:
+        elif current_key:
             current_lines.append(stripped)
 
     if current_key:
         result[current_key] = " ".join(current_lines).strip()
 
+    filled = sum(1 for v in result.values() if v)
+    log.info("Step4 parsed %d/5 pillars for %s", filled, ticker)
     return result
 
 
