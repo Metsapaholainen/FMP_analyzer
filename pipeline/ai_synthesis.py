@@ -367,6 +367,11 @@ def _build_per1000(raw: dict) -> dict | None:
     fcf         = pk(cf.get("freeCashFlow"))
     sbc         = pk(cf.get("stockBasedCompensation"))
 
+    # Residual "Other costs" so named rows always sum to ~$1,000
+    known = sum(v for v in [cogs, rd, sga, taxes, net_income] if v is not None)
+    other_val = round(1000 - known)
+    other = other_val if other_val > 10 else None
+
     year = (inc.get("calendarYear") or (inc.get("date") or "")[:4] or "")
     return {
         "year": year,
@@ -375,6 +380,7 @@ def _build_per1000(raw: dict) -> dict | None:
         "dep_amort": dep_amort, "op_income": op_income,
         "interest": interest, "taxes": taxes, "net_income": net_income,
         "capex": capex, "fcf": fcf, "sbc": sbc,
+        "other": other,
     }
 
 

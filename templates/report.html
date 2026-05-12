@@ -403,11 +403,12 @@
     <div class="per1k-grid">
       {# Cost breakdown — these sum to ~$1,000 with net profit #}
       {% set cost_rows = [
-        ("Cost of goods / delivery", p1k.cogs,       "var(--bad)"),
-        ("Research & development",   p1k.rd,          "#a78bfa"),
-        ("Sales, marketing & admin", p1k.sga,         "var(--warn)"),
-        ("Taxes",                    p1k.taxes,        "#6b7280"),
-        ("Net profit",               p1k.net_income,  "var(--good)"),
+        ("Cost of goods / delivery",          p1k.cogs,       "var(--bad)"),
+        ("Research & development",            p1k.rd,          "#a78bfa"),
+        ("Sales, marketing & admin",          p1k.sga,         "var(--warn)"),
+        ("Other costs (interest, D&A, etc.)", p1k.other,       "#64748b"),
+        ("Taxes",                             p1k.taxes,        "#6b7280"),
+        ("Net profit",                        p1k.net_income,  "var(--good)"),
       ] %}
       {% for label, val, color in cost_rows %}
         {% if val is not none and val != 0 %}
