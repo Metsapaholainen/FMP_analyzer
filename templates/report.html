@@ -735,17 +735,20 @@
   <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">What does the company own?</h3>
   <div class="per1k-grid" style="margin-bottom:18px">
     {% set asset_rows = [
-      ("Cash &amp; investments",       bs.assets.cash,                "#2dd4bf"),
-      ("Receivables",                   bs.assets.receivables,         "#60a5fa"),
-      ("Inventory",                     bs.assets.inventory,           "#f59e0b"),
-      ("PP&amp;E (tangible assets)",    bs.assets.ppe,                 "#f97316"),
-      ("Goodwill &amp; intangibles",    bs.assets.goodwill_intangibles,"#a78bfa"),
-      ("Other assets",                  bs.assets.other_assets,        "#64748b"),
+      ("Cash & investments",       "Bank accounts, money market funds, short-term securities",  bs.assets.cash,                "#2dd4bf"),
+      ("Receivables",              "Money customers owe but haven't paid yet (e.g. unpaid invoices)", bs.assets.receivables,    "#60a5fa"),
+      ("Inventory",                "Goods ready to sell or raw materials to produce them",       bs.assets.inventory,           "#f59e0b"),
+      ("PP&E (tangible assets)",   "Buildings, factories, equipment, vehicles, land",            bs.assets.ppe,                 "#f97316"),
+      ("Goodwill & intangibles",   "Brand value, patents, customer lists acquired via M&A; disappears in a write-down", bs.assets.goodwill_intangibles, "#a78bfa"),
+      ("Other assets",             "Deferred taxes, prepaid expenses, long-term investments, other", bs.assets.other_assets,   "#64748b"),
     ] %}
-    {% for label, val, color in asset_rows %}
+    {% for label, desc, val, color in asset_rows %}
       {% if val is not none and val > 0 %}
-      <div class="per1k-row">
-        <span class="per1k-label">{{ label }}</span>
+      <div class="per1k-row bs-row-with-desc">
+        <div class="per1k-label-col">
+          <span class="per1k-label">{{ label }}</span>
+          <span class="per1k-desc">{{ desc }}</span>
+        </div>
         <div class="per1k-bar-wrap">
           <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
         </div>
@@ -759,15 +762,18 @@
   <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">How is it financed?</h3>
   <div class="per1k-grid" style="margin-bottom:18px">
     {% set fin_rows = [
-      ("Current liabilities",      bs.financing.current_liabilities, "#f87171"),
-      ("Long-term debt",           bs.financing.long_term_debt,      "#ef4444"),
-      ("Other liabilities",        bs.financing.other_liabilities,   "#94a3b8"),
-      ("Shareholders' equity",     bs.financing.equity,              "var(--good)"),
+      ("Current liabilities",   "Bills due within 12 months: accounts payable, accrued wages, short-term debt", bs.financing.current_liabilities, "#f87171"),
+      ("Long-term debt",        "Bonds and bank loans due after 12 months; the main leverage risk",             bs.financing.long_term_debt,      "#ef4444"),
+      ("Other liabilities",     "Deferred revenue, pension obligations, operating lease liabilities",           bs.financing.other_liabilities,   "#94a3b8"),
+      ("Shareholders' equity",  "Book value: total assets minus all liabilities; what owners actually own",     bs.financing.equity,              "var(--good)"),
     ] %}
-    {% for label, val, color in fin_rows %}
+    {% for label, desc, val, color in fin_rows %}
       {% if val is not none and val > 0 %}
-      <div class="per1k-row">
-        <span class="per1k-label">{{ label }}</span>
+      <div class="per1k-row bs-row-with-desc">
+        <div class="per1k-label-col">
+          <span class="per1k-label">{{ label }}</span>
+          <span class="per1k-desc">{{ desc }}</span>
+        </div>
         <div class="per1k-bar-wrap">
           <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
         </div>
