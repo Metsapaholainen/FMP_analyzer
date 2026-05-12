@@ -85,9 +85,15 @@ def _extract_corporate_actions(news_raw: list, press_raw: list) -> str:
     )
 
 
+def _fmt_pillar(p: dict) -> str:
+    """One-line summary of a Step 4 pillar for the AI prompt."""
+    return f"{p.get('score')}/{p.get('max_score')} — {p.get('verdict')}"
+
+
 def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
                   moat_hypothesis: str, raw: dict | None = None,
-                  competition: dict | None = None) -> str:
+                  competition: dict | None = None,
+                  fundamental_analysis: dict | None = None) -> str:
     # ── News & press releases block ────────────────────────────────────────
     news_raw = listify(raw.get("stock_news")) if raw else []
     press_raw = listify(raw.get("press_releases")) if raw else []
@@ -221,6 +227,19 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
             "peers_used": competition.get("peers_used"),
         }
 
+    if fundamental_analysis:
+        pillars = fundamental_analysis.get("pillars") or {}
+        fa_lines = [
+            f"Overall: {fundamental_analysis.get('total_score')}/{fundamental_analysis.get('max_score')} — {fundamental_analysis.get('verdict')}",
+        ]
+        for name, p in pillars.items():
+            pts_str = _fmt_pillar(p)
+            key_pts = "; ".join(
+                f"{pt['label']}: {pt['value']}" for pt in (p.get("points") or [])[:2]
+            )
+            fa_lines.append(f"  {name.replace('_', ' ').title()}: {pts_str}  [{key_pts}]")
+        scorecard["step4_business_quality"] = "\n".join(fa_lines)
+
     hypothesis_block = ""
     if moat_hypothesis:
         hypothesis_block = (
@@ -263,7 +282,8 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
 
 def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
                moat_hypothesis: str = "", raw: dict | None = None,
-               competition: dict | None = None) -> dict:
+               competition: dict | None = None,
+               fundamental_analysis: dict | None = None) -> dict:
     """Returns {markdown, model, input_tokens, output_tokens, cost_usd, used_ai}."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return _fallback(snapshot, moat, valuation, moat_hypothesis,
@@ -274,7 +294,8 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         return _fallback(snapshot, moat, valuation, moat_hypothesis, "anthropic SDK not installed.")
 
     prompt = _build_prompt(snapshot, moat, valuation, red_flags, moat_hypothesis,
-                           raw=raw, competition=competition)
+                           raw=raw, competition=competition,
+                           fundamental_analysis=fundamental_analysis)
 
     try:
         client = anthropic.Anthropic()
@@ -314,6 +335,7 @@ def _build_chat_system(report: dict) -> str:
     competition = report.get("competition") or {}
     val = report.get("valuation", {})
     flags = report.get("red_flags", [])
+    fa = report.get("fundamental_analysis") or {}
     ai_md = (report.get("ai") or {}).get("markdown", "")
 
     scorecard = {
@@ -361,6 +383,13 @@ def _build_chat_system(report: dict) -> str:
         },
         "red_flags": [{"title": f["title"], "severity": f["severity"]} for f in flags[:8]],
     }
+
+    if fa:
+        pillars = fa.get("pillars") or {}
+        fa_lines = [f"Overall: {fa.get('total_score')}/{fa.get('max_score')} — {fa.get('verdict')}"]
+        for name, p in pillars.items():
+            fa_lines.append(f"  {name.replace('_', ' ').title()}: {_fmt_pillar(p)}")
+        scorecard["step4_business_quality"] = "\n".join(fa_lines)
 
     # Include recent news + press releases so chat can answer questions about
     # announcements (buybacks, M&A, guidance) not visible in the scorecard.

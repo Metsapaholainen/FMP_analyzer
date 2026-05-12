@@ -28,6 +28,7 @@ from pipeline.red_flags import detect_red_flags
 from pipeline.ai_synthesis import synthesize, chat_followup
 from pipeline.ceo_analysis import build_ceo_analysis
 from pipeline.competition import build_competition
+from pipeline.fundamental_analysis import build_fundamental_analysis
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -149,9 +150,11 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
     ceo = build_ceo_analysis(raw, fundamentals, moat)
     valuation = build_valuation(raw, fundamentals)
     red_flags = detect_red_flags(raw, fundamentals)
+    fundamental_analysis = build_fundamental_analysis(fundamentals, red_flags, ceo, competition)
     ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
                     moat_hypothesis=moat_hypothesis.strip(), raw=raw,
-                    competition=competition)
+                    competition=competition,
+                    fundamental_analysis=fundamental_analysis)
 
     elapsed = round(time.time() - t0, 2)
     log.info("pipeline %s done in %.2fs (ai=%s, cost=$%.5f)",
@@ -167,6 +170,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
         "ceo": ceo,
         "valuation": valuation,
         "red_flags": red_flags,
+        "fundamental_analysis": fundamental_analysis,
         "ai": ai,
         # Store news/press-releases for in-page chat context (not full raw to keep cache small)
         "_news": raw.get("stock_news") or [],

@@ -351,6 +351,51 @@
   {% endif %}
 </section>
 
+<!-- STEP 4 — BUSINESS QUALITY REPORT CARD -->
+{% if report.fundamental_analysis %}
+{% set fa = report.fundamental_analysis %}
+{% macro bq_score_class(score, max) -%}
+  {%- if max and max > 0 -%}
+    {%- set r = score / max -%}
+    {%- if r >= 0.80 -%}great{%- elif r >= 0.60 -%}good{%- elif r >= 0.40 -%}warn{%- elif r >= 0.25 -%}bad{%- else -%}critical{%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+<section class="card">
+  <h2>Step 4 — Business quality</h2>
+  <p class="sub">Five-pillar report card synthesising growth, profitability, financial health, risks and management into a single score.</p>
+  <div class="bq-banner">
+    <span class="big-score {{ bq_score_class(fa.total_score, fa.max_score) }}">{{ fa.total_score }}/{{ fa.max_score }}</span>
+    <strong>{{ fa.verdict }}</strong>
+  </div>
+  <div class="bq-grid">
+    {% for key, pillar in fa.pillars.items() %}
+    <div class="bq-pillar">
+      <div class="bq-pillar-head">
+        <span class="pane-label">{{ key.replace('_', ' ').title() }}</span>
+        <span class="big-score {{ bq_score_class(pillar.score, pillar.max_score) }}">{{ pillar.score }}/{{ pillar.max_score }}</span>
+        <strong style="font-size:0.88rem">{{ pillar.verdict }}</strong>
+      </div>
+      {% if pillar.points %}
+      <div class="tablewrap">
+      <table>
+        <tbody>
+        {% for pt in pillar.points %}
+        <tr>
+          <th style="white-space:nowrap">{{ pt.label }}</th>
+          <td style="font-weight:600">{{ pt.value }}</td>
+          <td style="color:var(--mute);font-size:0.83rem">{{ pt.note }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <!-- CEO / CAPITAL ALLOCATION -->
 {% if report.ceo %}
 <section class="card">
