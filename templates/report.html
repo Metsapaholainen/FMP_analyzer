@@ -354,6 +354,7 @@
 <!-- STEP 4 — BUSINESS QUALITY REPORT CARD -->
 {% if report.fundamental_analysis %}
 {% set fa = report.fundamental_analysis %}
+{% set fa_ai = report.ai_step4 or {} %}
 {% macro bq_score_class(score, max) -%}
   {%- if max and max > 0 -%}
     {%- set r = score / max -%}
@@ -375,6 +376,10 @@
         <span class="big-score {{ bq_score_class(pillar.score, pillar.max_score) }}">{{ pillar.score }}/{{ pillar.max_score }}</span>
         <strong style="font-size:0.88rem">{{ pillar.verdict }}</strong>
       </div>
+      {% set ai_note = fa_ai.get(key) if fa_ai else "" %}
+      {% if ai_note %}
+      <p style="font-size:0.87rem;color:var(--fg);margin:0 0 10px;line-height:1.5">{{ ai_note }}</p>
+      {% endif %}
       {% if pillar.points %}
       <div class="tablewrap">
       <table>

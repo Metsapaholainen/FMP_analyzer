@@ -25,7 +25,7 @@ from pipeline.fundamentals import build_fundamentals
 from pipeline.moat import build_moat, build_story_moat, build_growth_moat
 from pipeline.valuation import build_valuation
 from pipeline.red_flags import detect_red_flags
-from pipeline.ai_synthesis import synthesize, chat_followup
+from pipeline.ai_synthesis import synthesize, synthesize_step4, chat_followup
 from pipeline.ceo_analysis import build_ceo_analysis
 from pipeline.competition import build_competition
 from pipeline.fundamental_analysis import build_fundamental_analysis
@@ -151,6 +151,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
     valuation = build_valuation(raw, fundamentals)
     red_flags = detect_red_flags(raw, fundamentals)
     fundamental_analysis = build_fundamental_analysis(fundamentals, red_flags, ceo, competition)
+    ai_step4 = synthesize_step4(fundamental_analysis, fundamentals["snapshot"])
     ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
                     moat_hypothesis=moat_hypothesis.strip(), raw=raw,
                     competition=competition,
@@ -171,6 +172,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
         "valuation": valuation,
         "red_flags": red_flags,
         "fundamental_analysis": fundamental_analysis,
+        "ai_step4": ai_step4,
         "ai": ai,
         # Store news/press-releases for in-page chat context (not full raw to keep cache small)
         "_news": raw.get("stock_news") or [],

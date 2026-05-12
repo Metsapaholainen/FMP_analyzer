@@ -324,6 +324,89 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
     }
 
 
+_STEP4_PILLARS = ["growth", "profitability", "financial_health", "risks", "management"]
+
+
+def synthesize_step4(fundamental_analysis: dict, snapshot: dict) -> dict:
+    """Focused Haiku call that writes a 2-3 sentence analyst commentary for each
+    of the 5 business quality pillars. Returns dict keyed by pillar name.
+    Falls back to empty strings if AI unavailable."""
+    empty = {k: "" for k in _STEP4_PILLARS}
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return empty
+    try:
+        import anthropic
+    except ImportError:
+        return empty
+
+    pillars = fundamental_analysis.get("pillars") or {}
+    ticker  = snapshot.get("ticker") or ""
+    name    = snapshot.get("name") or ticker
+    sector  = snapshot.get("sector") or ""
+
+    # Build a compact data summary for each pillar
+    pillar_lines = []
+    for key in _STEP4_PILLARS:
+        p = pillars.get(key) or {}
+        pts_pct = f"{p.get('score')}/{p.get('max_score')} ({p.get('verdict')})"
+        data_pts = "; ".join(
+            f"{pt['label']}: {pt['value']}" for pt in (p.get("points") or [])[:4]
+            if pt.get("value") and pt["value"] != "—"
+        )
+        pillar_lines.append(f"{key.upper()}: {pts_pct}\n  Data: {data_pts}")
+
+    prompt = (
+        f"You are a strict equity analyst writing a Step 4 business quality assessment for "
+        f"{ticker} ({name}), a {sector} company.\n\n"
+        f"For each pillar below write EXACTLY 2-3 sentences. Interpret what the numbers mean "
+        f"for the investor — do not just repeat the numbers. Be direct and honest. "
+        f"If a metric is weak, say so. Reference specific figures to support your point.\n\n"
+        + "\n\n".join(pillar_lines) + "\n\n"
+        "Reply in this EXACT format (pillar name in ALL CAPS on its own line, then your sentences):\n\n"
+        "GROWTH\n[your 2-3 sentences]\n\n"
+        "PROFITABILITY\n[your 2-3 sentences]\n\n"
+        "FINANCIAL_HEALTH\n[your 2-3 sentences]\n\n"
+        "RISKS\n[your 2-3 sentences]\n\n"
+        "MANAGEMENT\n[your 2-3 sentences]"
+    )
+
+    try:
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model=MODEL,
+            max_tokens=700,
+            temperature=0.2,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(b.text for b in msg.content if hasattr(b, "text"))
+    except Exception as e:
+        log.warning("Step4 AI call failed: %s", e)
+        return empty
+
+    # Parse: split on ALL-CAPS pillar headers
+    result = dict(empty)
+    current_key = None
+    current_lines: list[str] = []
+    key_map = {k.upper().replace("_", "_"): k for k in _STEP4_PILLARS}
+    key_map["FINANCIAL_HEALTH"] = "financial_health"
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        upper = stripped.replace(" ", "_")
+        if upper in key_map:
+            if current_key:
+                result[current_key] = " ".join(current_lines).strip()
+            current_key = key_map[upper]
+            current_lines = []
+        elif current_key and stripped:
+            current_lines.append(stripped)
+
+    if current_key:
+        result[current_key] = " ".join(current_lines).strip()
+
+    return result
+
+
 def _build_chat_system(report: dict) -> str:
     """Compact system prompt for chat follow-ups. Includes the scorecards and AI
     summary the user already sees, so the model can answer in-context without
