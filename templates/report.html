@@ -403,19 +403,44 @@
       <p style="font-size:0.87rem;color:var(--fg);margin:0 0 10px;line-height:1.5">{{ ai_note }}</p>
       {% endif %}
       {% if pillar.points %}
+      {%- set seg_header_list = pillar.points | selectattr('label', 'equalto', 'Segment breakdown') | list %}
+      {%- set has_segs = seg_header_list | length > 0 %}
       <div class="tablewrap">
       <table>
         <tbody>
+        {% set ns = namespace(in_segs=false) %}
         {% for pt in pillar.points %}
-        <tr>
-          <th style="white-space:nowrap">{{ pt.label }}</th>
-          <td style="font-weight:600">{{ pt.value }}</td>
-          <td style="color:var(--mute);font-size:0.83rem">{{ pt.note }}</td>
-        </tr>
+          {% if pt.label == "Segment breakdown" %}{% set ns.in_segs = true %}
+          {% elif not ns.in_segs %}
+          <tr>
+            <th style="white-space:nowrap">{{ pt.label }}</th>
+            <td style="font-weight:600">{{ pt.value }}</td>
+            <td style="color:var(--mute);font-size:0.83rem">{{ pt.note }}</td>
+          </tr>
+          {% endif %}
         {% endfor %}
         </tbody>
       </table>
       </div>
+      {% if has_segs %}
+      {%- set seg_hdr = seg_header_list | first %}
+      <div class="seg-breakdown">
+        <div class="seg-breakdown-label">Segment growth — {{ seg_hdr.note }}</div>
+        {% for pt in pillar.points %}
+          {% if pt.label[:2] == "  " %}
+          {%- set pct_num = pt.value.split('%')[0] | trim %}
+          <div class="seg-row">
+            <div class="seg-row-top">
+              <span class="seg-name">{{ pt.label | trim }}</span>
+              <div class="seg-bar-wrap"><div class="seg-bar" style="width:{{ pct_num }}%"></div></div>
+              <span class="seg-pct">{{ pt.value }}</span>
+            </div>
+            <div class="seg-note-text">{{ pt.note }}</div>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
       {% endif %}
     </div>
     {% endfor %}

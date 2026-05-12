@@ -373,4 +373,61 @@ button:hover { filter: brightness(1.05); }
 }
 .bq-pillar table { min-width: 0; font-size: 0.83rem; }
 
+/* ---- Segment growth bar chart (Growth pillar) ---- */
+.seg-breakdown {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.seg-breakdown-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--mute);
+  margin-bottom: 8px;
+}
+.seg-row { margin-bottom: 8px; }
+.seg-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.seg-name {
+  font-size: 0.83rem;
+  color: var(--fg);
+  min-width: 110px;
+  max-width: 110px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seg-bar-wrap {
+  flex: 1;
+  background: var(--border);
+  border-radius: 3px;
+  height: 6px;
+}
+.seg-bar {
+  background: var(--accent);
+  border-radius: 3px;
+  height: 6px;
+  min-width: 2px;
+  max-width: 100%;
+}
+.seg-pct {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  min-width: 60px;
+  text-align: right;
+}
+.seg-note-text {
+  font-size: 0.75rem;
+  color: var(--mute);
+  padding-left: 118px;
+  line-height: 1.4;
+}
+
 footer { margin-top: 30px; }
