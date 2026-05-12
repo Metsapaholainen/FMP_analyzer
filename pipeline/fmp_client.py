@@ -125,6 +125,100 @@ async def fmp_get(
     return data
 
 
+async def fetch_10k_risk_text(client: httpx.AsyncClient, sec_filings: list) -> str | None:
+    """Stream the most recent 10-K from SEC EDGAR and extract the Risk Factors section.
+
+    Uses the finalLink from FMP's sec_filings metadata to find the actual document.
+    Streams up to 2 MB then stops — enough to capture Item 1A for most filers.
+    Returns the raw text (HTML-stripped) of the Risk Factors section, or None.
+    """
+    import re
+    from html.parser import HTMLParser
+
+    annual = [f for f in sec_filings
+              if (f.get("formType") or f.get("type") or "").upper().startswith("10-K")]
+    if not annual:
+        return None
+
+    link = annual[0].get("finalLink") or annual[0].get("link") or ""
+    if not link or "sec.gov" not in link:
+        return None
+
+    headers = {
+        # SEC requires a descriptive User-Agent: https://www.sec.gov/os/accessing-edgar-data
+        "User-Agent": "FMP-Analyzer research tool (noreply@fmp-analyzer.local)",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+
+    try:
+        chunks: list[str] = []
+        total = 0
+        async with client.stream("GET", link, timeout=25.0, headers=headers,
+                                  follow_redirects=True) as r:
+            if r.status_code != 200:
+                log.warning("EDGAR 10-K fetch HTTP %s for %s", r.status_code, link)
+                return None
+            content_type = r.headers.get("content-type", "")
+            if "html" not in content_type and "text" not in content_type:
+                log.warning("EDGAR 10-K unexpected content-type: %s", content_type)
+                return None
+            async for chunk in r.aiter_text(chunk_size=32_768):
+                chunks.append(chunk)
+                total += len(chunk)
+                if total >= 2_000_000:
+                    break
+        html = "".join(chunks)
+    except Exception as e:
+        log.warning("EDGAR 10-K stream failed for %s: %s", link, e)
+        return None
+
+    # Strip HTML tags, skipping script/style content
+    class _Stripper(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self._skip = False
+            self.parts: list[str] = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag.lower() in ("script", "style"):
+                self._skip = True
+
+        def handle_endtag(self, tag):
+            if tag.lower() in ("script", "style"):
+                self._skip = False
+
+        def handle_data(self, data):
+            if not self._skip:
+                self.parts.append(data)
+
+    stripper = _Stripper()
+    try:
+        stripper.feed(html)
+    except Exception:
+        pass
+    text = " ".join(stripper.parts)
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    # Find "Item 1A" risk factors section
+    m = re.search(
+        r'Item\s+1A[\.\-–—]?\s*(?:\.?\s*)?Risk\s+Factors',
+        text, re.IGNORECASE
+    )
+    if not m:
+        log.info("EDGAR 10-K: Item 1A not found in first 2MB of %s", link)
+        return None
+
+    start = m.start()
+    # End: Item 1B (Unresolved Staff Comments) or Item 2 (Properties)
+    tail = text[start + 300:]
+    end_m = re.search(r'Item\s+1B|Item\s+2[\.\s\-–—]', tail, re.IGNORECASE)
+    end = start + 300 + (end_m.start() if end_m else min(len(tail), 8_000))
+
+    risk_text = text[start:end].strip()
+    log.info("EDGAR 10-K: extracted %d chars of risk factors from %s", len(risk_text), link)
+    return risk_text[:7_000]
+
+
 async def fetch_all(ticker: str) -> dict:
     """Pull every endpoint we need for a single-ticker analysis in parallel.
     Returns dict keyed by logical name; values may be None/[] on failure (callers must handle)."""
@@ -212,17 +306,39 @@ async def fetch_all(ticker: str) -> dict:
                 )
                 return pt, {"key_metrics_ttm": km, "ratios_ttm": rt, "profile": pf}
 
-            peer_results = await asyncio.gather(
-                *[_fetch_peer(pt) for pt in peer_tickers],
-                return_exceptions=True,
-            )
-            for r in peer_results:
-                if isinstance(r, Exception):
-                    log.warning("FMP peer fetch failed: %s", r)
-                    continue
-                pt, blob = r
-                peer_metrics[pt] = blob
+            # Fetch peer metrics and 10-K risk factors text in parallel
+            sec_data = listify(out.get("sec_filings"))
+            gather_inputs: list = [_fetch_peer(pt) for pt in peer_tickers]
+            if sec_data:
+                gather_inputs.append(fetch_10k_risk_text(client, sec_data))
+
+            all_results = await asyncio.gather(*gather_inputs, return_exceptions=True)
+
+            risk_result = all_results[-1] if sec_data else None
+            peer_results = all_results[:-1] if sec_data else all_results
+        else:
+            # No peers — still fetch 10-K risk text
+            sec_data = listify(out.get("sec_filings"))
+            if sec_data:
+                risk_result = await fetch_10k_risk_text(client, sec_data)
+            else:
+                risk_result = None
+            peer_results = []
+
+        for r in peer_results:
+            if isinstance(r, Exception):
+                log.warning("FMP peer fetch failed: %s", r)
+                continue
+            pt, blob = r
+            peer_metrics[pt] = blob
         out["peer_metrics"] = peer_metrics
+
+        # Store raw 10-K risk factors text (None if unavailable or fetch failed)
+        if isinstance(risk_result, Exception):
+            log.warning("EDGAR 10-K risk fetch failed: %s", risk_result)
+            out["_10k_risk_text"] = None
+        else:
+            out["_10k_risk_text"] = risk_result
 
     return out
 

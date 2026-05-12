@@ -913,6 +913,45 @@ def _build_earnings_quality(raw: dict) -> list[dict] | None:
     return rows or None
 
 
+def _extract_10k_risks(raw: dict) -> list[dict] | None:
+    """Use Haiku to extract the 5 most material risks from the raw 10-K risk text.
+
+    Returns a list of dicts: {title, category, detail} or None if unavailable.
+    Categories: competitive | regulatory | financial | operational | macro
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    risk_text = (raw or {}).get("_10k_risk_text") or ""
+    if not risk_text or len(risk_text) < 200:
+        return None
+    try:
+        import anthropic, json as _json
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model=MODEL,
+            max_tokens=900,
+            temperature=0,
+            system=(
+                "You are a financial risk analyst. Extract the 5 most material risk factors "
+                "from the 10-K Risk Factors section provided. "
+                "Return ONLY a JSON array (no markdown, no explanation) with objects having these keys:\n"
+                "  title: string (6-10 words, start with a noun phrase — e.g. 'Intense competition in cloud AI market')\n"
+                "  category: one of competitive | regulatory | financial | operational | macro\n"
+                "  detail: string (1-2 concise sentences describing the risk and its potential impact)\n"
+                "Pick risks that are SPECIFIC to this company, not boilerplate. "
+                "Exclude generic legal/tax disclaimers unless they are the dominant concern."
+            ),
+            messages=[{"role": "user", "content": risk_text[:5_000]}],
+        )
+        text = "".join(b.text for b in msg.content if hasattr(b, "text")).strip()
+        risks = _json.loads(text)
+        if isinstance(risks, list):
+            return [r for r in risks if isinstance(r, dict) and r.get("title")][:7]
+    except Exception as e:
+        log.warning("10K risk AI extraction failed: %s", e)
+    return None
+
+
 def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
                      raw: dict | None = None,
                      competition: dict | None = None,
@@ -1149,6 +1188,7 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     result["_growth_quality"]   = _build_growth_quality(raw)                    if raw else None
     result["_balance_sheet"]    = _build_balance_sheet_viz(raw, fundamentals)   if raw else None
     result["_net_debt_trend"]   = _build_net_debt_trend(raw, fundamentals)      if raw else None
+    result["_10k_risks"]        = _extract_10k_risks(raw)                       if raw else None
     return result
 
 

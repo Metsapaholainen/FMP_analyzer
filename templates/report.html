@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=13">
+<link rel="stylesheet" href="/static/style.css?v=14">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -881,6 +881,26 @@
     <p>No red flags triggered. (Doesn't mean clean — verify against the 10K MD&A.)</p>
   {% endif %}
 </section>
+
+<!-- 10-K RISK FACTORS -->
+{% set risks_10k = report.ai_step4._10k_risks %}
+{% if risks_10k %}
+<section class="card">
+  <h2>10-K risk factors <span class="badge-source">from latest annual filing</span></h2>
+  <p class="sub">AI-extracted from the company's own Risk Factors disclosure (Item 1A). These are the risks management considers material — more specific than generic screening signals above.</p>
+  <div class="risk10k-grid">
+    {% for r in risks_10k %}
+    <div class="risk10k-card risk10k-{{ r.category }}">
+      <div class="risk10k-head">
+        <span class="risk10k-cat">{{ r.category }}</span>
+        <strong class="risk10k-title">{{ r.title }}</strong>
+      </div>
+      <p class="risk10k-detail">{{ r.detail }}</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 <!-- CHAT FOLLOW-UPS -->
 <section class="card">
