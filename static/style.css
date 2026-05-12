@@ -373,6 +373,37 @@ button:hover { filter: brightness(1.05); }
 }
 .bq-pillar table { min-width: 0; font-size: 0.83rem; }
 
+/* ---- Business model / per-$1,000 panel ---- */
+.biz-model-panel {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.biz-model-head { margin-bottom: 12px; }
+.per1k-grid { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.per1k-row {
+  display: grid;
+  grid-template-columns: 190px 1fr 52px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+.per1k-label { color: var(--fg); white-space: nowrap; }
+.per1k-bar-wrap { background: var(--border); border-radius: 3px; height: 7px; }
+.per1k-bar { border-radius: 3px; height: 7px; min-width: 2px; max-width: 100%; opacity: 0.85; }
+.per1k-val { font-weight: 700; text-align: right; font-size: 0.83rem; }
+.per1k-note { font-size: 0.72rem; color: var(--mute); margin-top: 4px; }
+.biz-model-text {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--fg);
+  line-height: 1.55;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
 /* ---- Segment growth bar chart (Growth pillar) ---- */
 .seg-breakdown {
   margin-top: 12px;

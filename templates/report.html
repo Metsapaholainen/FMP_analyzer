@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=4">
+<link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -390,6 +390,46 @@
     <span class="big-score {{ bq_score_class(fa.total_score, fa.max_score) }}">{{ fa.total_score }}/{{ fa.max_score }}</span>
     <strong>{{ fa.verdict }}</strong>
   </div>
+
+  {# Business model plain-English panel #}
+  {% set biz_text = fa_ai.get('business_model') if fa_ai else "" %}
+  {% set p1k = fa_ai.get('_per1000') if fa_ai else none %}
+  {% if biz_text or p1k %}
+  <div class="biz-model-panel">
+    <div class="biz-model-head">
+      <span class="pane-label">How the business makes money</span>
+    </div>
+    {% if p1k %}
+    <div class="per1k-grid">
+      {% set rows = [
+        ("Cost of goods / delivery", p1k.cogs, "var(--bad)"),
+        ("Research & development",   p1k.rd,   "#a78bfa"),
+        ("Sales, marketing & admin", p1k.sga,  "var(--warn)"),
+        ("Operating profit",         p1k.op_income, "var(--accent)"),
+        ("Taxes",                    p1k.taxes, "var(--mute)"),
+        ("Net profit",               p1k.net_income, "var(--good)"),
+        ("Free cash flow",           p1k.fcf,  "#5eead4"),
+      ] %}
+      {% for label, val, color in rows %}
+        {% if val is not none and val != 0 %}
+        <div class="per1k-row">
+          <span class="per1k-label">{{ label }}</span>
+          <div class="per1k-bar-wrap">
+            <div class="per1k-bar" style="width:{{ [val, 0] | max }}%;background:{{ color }}"></div>
+          </div>
+          <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
+        </div>
+        {% endif %}
+      {% endfor %}
+      <div class="per1k-note">per $1,000 revenue{% if p1k.year %} · FY{{ p1k.year }}{% endif %}{% if p1k.revenue_b %} · total revenue ${{ p1k.revenue_b }}B{% endif %}</div>
+    </div>
+    {% endif %}
+    {% if biz_text %}
+    <p class="biz-model-text">{{ biz_text }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="bq-grid">
     {% for key, pillar in fa.pillars.items() %}
     <div class="bq-pillar">

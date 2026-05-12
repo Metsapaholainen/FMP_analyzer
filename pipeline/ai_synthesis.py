@@ -324,7 +324,58 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
     }
 
 
-_STEP4_PILLARS = ["growth", "profitability", "financial_health", "risks", "management"]
+_STEP4_PILLARS = ["business_model", "growth", "profitability", "financial_health", "risks", "management"]
+
+
+def _build_per1000(raw: dict) -> dict | None:
+    """Compute a per-$1,000-revenue income breakdown from the most recent annual filing."""
+    income_a = raw.get("income_annual") or []
+    cf_a     = raw.get("cashflow_annual") or []
+    if not income_a:
+        return None
+    inc = income_a[0]
+    cf  = cf_a[0] if cf_a else {}
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    rev = _s(inc.get("revenue"))
+    if not rev or rev <= 0:
+        return None
+
+    def pk(v):  # per $1,000
+        x = _s(v)
+        return round(x / rev * 1000) if x is not None else None
+
+    cogs        = pk(inc.get("costOfRevenue"))
+    gross       = pk(inc.get("grossProfit"))
+    rd          = pk(inc.get("researchAndDevelopmentExpenses")
+                     or inc.get("researchAndDevelopmentExpense"))
+    sga         = pk(inc.get("sellingGeneralAndAdministrativeExpenses")
+                     or inc.get("sellingGeneralAndAdministrativeExpense"))
+    dep_amort   = pk(inc.get("depreciationAndAmortization"))
+    op_income   = pk(inc.get("operatingIncome"))
+    interest    = pk(inc.get("interestExpense"))
+    taxes       = pk(inc.get("incomeTaxExpense"))
+    net_income  = pk(inc.get("netIncome"))
+    capex_raw   = _s(cf.get("capitalExpenditure"))
+    capex       = round(abs(capex_raw) / rev * 1000) if capex_raw is not None else None
+    fcf         = pk(cf.get("freeCashFlow"))
+    sbc         = pk(cf.get("stockBasedCompensation"))
+
+    year = (inc.get("calendarYear") or (inc.get("date") or "")[:4] or "")
+    return {
+        "year": year,
+        "revenue_b": round(rev / 1e9, 1),
+        "cogs": cogs, "gross": gross, "rd": rd, "sga": sga,
+        "dep_amort": dep_amort, "op_income": op_income,
+        "interest": interest, "taxes": taxes, "net_income": net_income,
+        "capex": capex, "fcf": fcf, "sbc": sbc,
+    }
 
 
 def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
@@ -397,9 +448,14 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         for f in (red_flags or [])[:5]
     ]
 
+    # ── Per $1,000 revenue breakdown ─────────────────────────────────────────
+    per1000 = _build_per1000(raw) if raw else None
+
     # ── Per-pillar score summary ──────────────────────────────────────────────
     pillar_lines = []
     for key in _STEP4_PILLARS:
+        if key == "business_model":
+            continue  # AI-only, no scored pillar data
         p = pillars.get(key) or {}
         pts_pct = f"{p.get('score')}/{p.get('max_score')} ({p.get('verdict')})"
         data_pts = "; ".join(
@@ -452,6 +508,30 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         context_block += "GROWTH SOURCES (use these for the GROWTH pillar analysis):\n"
         context_block += "\n".join(growth_source_lines) + "\n\n"
 
+    # ── Per-$1,000 block for BUSINESS_MODEL section ───────────────────────────
+    per1000_lines: list[str] = []
+    if per1000:
+        yr = per1000.get("year") or ""
+        per1000_lines.append(f"For every $1,000 of {ticker} revenue (FY{yr}):")
+        for label, key in [
+            ("Cost of goods/delivery (COGS)", "cogs"),
+            ("Research & development",        "rd"),
+            ("Sales, marketing & admin (SG&A)","sga"),
+            ("Depreciation & amortization",    "dep_amort"),
+            ("Operating profit",               "op_income"),
+            ("Interest expense",               "interest"),
+            ("Taxes",                          "taxes"),
+            ("Net profit",                     "net_income"),
+            ("Capital expenditure (capex)",    "capex"),
+            ("Free cash flow",                 "fcf"),
+            ("Stock-based compensation",       "sbc"),
+        ]:
+            v = per1000.get(key)
+            if v is not None:
+                per1000_lines.append(f"  {label}: ${v}")
+    if per1000_lines:
+        context_block += "\n".join(per1000_lines) + "\n\n"
+
     prompt = (
         f"You are a strict equity analyst. Write a specific, insightful Step 4 assessment "
         f"for {ticker} ({name}), a {sector} / {industry} company.\n\n"
@@ -470,7 +550,12 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         "  (3) New products/services — are new segments appearing in revenue breakdown?\n"
         "  (4) M&A — does goodwill growth indicate acquisition-driven revenue?\n"
         "Identify which sources are driving growth and which are absent.\n\n"
-        "Reply in EXACT format:\n\n"
+        "For BUSINESS_MODEL write 2-3 plain-English sentences that explain how this business "
+        "makes money, using the per-$1,000 data above. Write as if explaining to a smart "
+        "non-expert: 'For every $1,000 a customer pays, $X goes to..., $X goes to..., "
+        "leaving $X as profit.' Name actual products/services where relevant.\n\n"
+        "Reply in EXACT format (all headers must be on their own line, uppercase):\n\n"
+        "BUSINESS_MODEL\n[2-3 sentences]\n\n"
         "GROWTH\n[2-3 sentences]\n\n"
         "PROFITABILITY\n[2-3 sentences]\n\n"
         "FINANCIAL_HEALTH\n[2-3 sentences]\n\n"
@@ -482,7 +567,7 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         client = anthropic.Anthropic()
         msg = client.messages.create(
             model=MODEL,
-            max_tokens=2000,
+            max_tokens=2500,
             temperature=0.2,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -520,7 +605,8 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         result[current_key] = " ".join(current_lines).strip()
 
     filled = sum(1 for v in result.values() if v)
-    log.info("Step4 parsed %d/5 pillars for %s", filled, ticker)
+    log.info("Step4 parsed %d/6 sections for %s", filled, ticker)
+    result["_per1000"] = per1000  # pass raw numbers through for template display
     return result
 
 
