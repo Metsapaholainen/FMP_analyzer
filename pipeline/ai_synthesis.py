@@ -384,6 +384,182 @@ def _build_per1000(raw: dict) -> dict | None:
     }
 
 
+def _build_growth_quality(raw: dict) -> list[dict] | None:
+    """Seven forensic checks for manufactured vs genuine growth."""
+    income_a = raw.get("income_annual") or []
+    cf_a     = raw.get("cashflow_annual") or []
+    bal_a    = raw.get("balance_annual") or []
+    if len(income_a) < 3:
+        return None
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    def cagr(new_v, old_v, years):
+        if not new_v or not old_v or old_v <= 0 or new_v <= 0 or years <= 0:
+            return None
+        return (new_v / old_v) ** (1.0 / years) - 1
+
+    cf_by_year  = {str(c.get("calendarYear") or (c.get("date") or "")[:4]): c for c in cf_a  if c.get("calendarYear") or c.get("date")}
+    bal_by_year = {str(b.get("calendarYear") or (b.get("date") or "")[:4]): b for b in bal_a if b.get("calendarYear") or b.get("date")}
+
+    results = []
+    n = min(4, len(income_a) - 1)
+
+    # ── 1. EPS vs Net Income CAGR (buyback-inflated EPS) ──────────────────────
+    cur, old = income_a[0], income_a[n]
+    eps_cur = _s(cur.get("epsdiluted") or cur.get("eps"))
+    eps_old = _s(old.get("epsdiluted") or old.get("eps"))
+    ni_cur  = _s(cur.get("netIncome"))
+    ni_old  = _s(old.get("netIncome"))
+    eps_c = cagr(abs(eps_cur), abs(eps_old), n) if eps_cur and eps_old else None
+    ni_c  = cagr(abs(ni_cur),  abs(ni_old),  n) if ni_cur  and ni_old  else None
+    if eps_c is not None and ni_c is not None:
+        gap = (eps_c - ni_c) * 100
+        sh_cur = _s(cur.get("weightedAverageShsOutDil") or cur.get("weightedAverageShsOut"))
+        sh_old = _s(old.get("weightedAverageShsOutDil") or old.get("weightedAverageShsOut"))
+        sh_note = f" · shares {(sh_cur/sh_old-1)*100:+.1f}%" if (sh_cur and sh_old) else ""
+        if gap > 15:
+            sig, note = "flag", f"EPS CAGR {eps_c*100:.1f}% vs NI CAGR {ni_c*100:.1f}% over {n}Y — buybacks are manufacturing EPS growth"
+        elif gap > 5:
+            sig, note = "warn", f"EPS CAGR {eps_c*100:.1f}% vs NI CAGR {ni_c*100:.1f}% over {n}Y — moderate buyback boost to EPS"
+        else:
+            sig, note = "ok", f"EPS and NI growing at similar rates ({eps_c*100:.1f}% vs {ni_c*100:.1f}%) — earnings growth is genuine"
+        results.append({"label": "EPS vs earnings growth", "signal": sig,
+                        "value": f"{gap:+.0f}pp gap{sh_note}", "note": note})
+
+    # ── 2. M&A dependency (goodwill vs revenue growth) ────────────────────────
+    cur_y = str(cur.get("calendarYear") or (cur.get("date") or "")[:4])
+    old_y = str(old.get("calendarYear") or (old.get("date") or "")[:4])
+    gw_cur  = _s((bal_by_year.get(cur_y) or {}).get("goodwill"))
+    gw_old  = _s((bal_by_year.get(old_y) or {}).get("goodwill"))
+    rv_cur  = _s(cur.get("revenue"))
+    rv_old  = _s(old.get("revenue"))
+    rv_c    = cagr(rv_cur, rv_old, n)
+    if gw_cur is not None and gw_old is not None and rv_c is not None:
+        gw_c = cagr(gw_cur, gw_old, n) if gw_old > 0 else None
+        if gw_cur == 0 or (gw_cur is not None and gw_cur < 1e6):
+            results.append({"label": "M&A vs organic growth", "signal": "ok",
+                            "value": "No goodwill", "note": "No goodwill — growth is organic, not acquisition-driven"})
+        elif gw_c is not None:
+            ratio = gw_c / rv_c if rv_c and rv_c > 0.01 else None
+            if gw_c > 0.20 and (ratio is None or ratio > 2):
+                sig, note = "flag", f"Goodwill CAGR {gw_c*100:.1f}% vs rev CAGR {rv_c*100:.1f}% over {n}Y — growth is M&A-driven, not organic"
+            elif gw_c > 0.10:
+                sig, note = "warn", f"Goodwill CAGR {gw_c*100:.1f}% vs rev {rv_c*100:.1f}%/yr — meaningful M&A contribution"
+            else:
+                sig, note = "ok", f"Goodwill growing {gw_c*100:.1f}%/yr vs rev {rv_c*100:.1f}% — M&A activity modest relative to growth"
+            results.append({"label": "M&A vs organic growth", "signal": sig,
+                            "value": f"GW {gw_c*100:+.1f}% vs Rev {rv_c*100:+.1f}%", "note": note})
+
+    # ── 3. Revenue → cash flow conversion ─────────────────────────────────────
+    n3 = min(3, len(income_a) - 1)
+    if n3 >= 2:
+        old3_y = str(income_a[n3].get("calendarYear") or (income_a[n3].get("date") or "")[:4])
+        rv3_old = _s(income_a[n3].get("revenue"))
+        ocf_cur = _s((cf_by_year.get(cur_y) or {}).get("operatingCashFlow"))
+        ocf_old = _s((cf_by_year.get(old3_y) or {}).get("operatingCashFlow"))
+        rv3_c   = cagr(rv_cur, rv3_old, n3)
+        ocf_c   = cagr(ocf_cur, ocf_old, n3) if (ocf_cur and ocf_cur > 0 and ocf_old and ocf_old > 0) else None
+        if rv3_c is not None and ocf_c is not None:
+            gap = (rv3_c - ocf_c) * 100
+            if gap > 10:
+                sig, note = "flag", f"Revenue {rv3_c*100:.1f}%/yr vs OCF {ocf_c*100:.1f}%/yr over {n3}Y — revenue not converting to cash; investigate margins or working capital"
+            elif gap > 5:
+                sig, note = "warn", f"Revenue growing {rv3_c*100:.1f}%/yr vs OCF {ocf_c*100:.1f}%/yr — mild divergence; monitor"
+            else:
+                sig, note = "ok", f"Revenue ({rv3_c*100:.1f}%/yr) and OCF ({ocf_c*100:.1f}%/yr) growing in sync — cash conversion healthy"
+            results.append({"label": "Revenue → cash conversion", "signal": sig,
+                            "value": f"Rev {rv3_c*100:+.1f}% vs OCF {ocf_c*100:+.1f}%", "note": note})
+
+    # ── 4. DSO trend (channel stuffing / collection risk) ─────────────────────
+    dso_series = []
+    for inc in income_a[:5]:
+        y   = str(inc.get("calendarYear") or (inc.get("date") or "")[:4])
+        rev = _s(inc.get("revenue"))
+        ar  = _s((bal_by_year.get(y) or {}).get("netReceivables") or (bal_by_year.get(y) or {}).get("accountsReceivable"))
+        if rev and rev > 0 and ar is not None:
+            dso_series.append((y, round(ar / rev * 365, 1)))
+    if len(dso_series) >= 3:
+        dso_cur, dso_old = dso_series[0][1], dso_series[-1][1]
+        rate = (dso_cur - dso_old) / (len(dso_series) - 1)
+        if rate > 5:
+            sig, note = "flag", f"DSO rising ~{rate:.1f} days/yr ({dso_old}→{dso_cur} days) — channel stuffing or collection deterioration"
+        elif rate > 2:
+            sig, note = "warn", f"DSO rising ~{rate:.1f} days/yr ({dso_old}→{dso_cur} days) — receivables growing faster than revenue"
+        else:
+            sig, note = "ok", f"DSO stable at ~{dso_cur} days (was {dso_old}) — collections consistent"
+        results.append({"label": "Days Sales Outstanding trend", "signal": sig,
+                        "value": f"{dso_cur} days (was {dso_old})", "note": note})
+
+    # ── 5. Sloan accrual ratio ────────────────────────────────────────────────
+    if len(income_a) >= 2:
+        prv_y  = str(income_a[1].get("calendarYear") or (income_a[1].get("date") or "")[:4])
+        ni_v   = _s(income_a[0].get("netIncome"))
+        ocf_v  = _s((cf_by_year.get(cur_y) or {}).get("operatingCashFlow"))
+        ta_cur = _s((bal_by_year.get(cur_y) or {}).get("totalAssets"))
+        ta_prv = _s((bal_by_year.get(prv_y) or {}).get("totalAssets"))
+        if ni_v is not None and ocf_v is not None and ta_cur and ta_prv:
+            avg_ta = (ta_cur + ta_prv) / 2
+            ar_pct = (ni_v - ocf_v) / avg_ta * 100
+            ar_str = f"{ar_pct:+.1f}%"
+            if ar_pct > 10:
+                sig, note = "flag", f"Sloan accrual ratio {ar_str} — earnings far exceed cash flow; aggressive accrual accounting likely"
+            elif ar_pct > 5:
+                sig, note = "warn", f"Sloan accrual ratio {ar_str} — elevated accruals; earnings quality below average"
+            elif ar_pct < -5:
+                sig, note = "ok", f"Sloan accrual ratio {ar_str} — FCF ahead of reported earnings; high-quality earnings"
+            else:
+                sig, note = "ok", f"Sloan accrual ratio {ar_str} — earnings and cash flow well-aligned"
+            results.append({"label": "Accrual ratio (Sloan)", "signal": sig, "value": ar_str, "note": note})
+
+    # ── 6. Capex vs depreciation (underinvestment / harvesting) ───────────────
+    cap_dep = []
+    for cf in cf_a[:4]:
+        cap = abs(_s(cf.get("capitalExpenditure")) or 0)
+        dep = _s(cf.get("depreciationAndAmortization"))
+        if cap and dep and dep > 0:
+            cap_dep.append(round(cap / dep, 2))
+    if len(cap_dep) >= 2:
+        avg = sum(cap_dep) / len(cap_dep)
+        declining = len(cap_dep) >= 3 and cap_dep[0] < cap_dep[-1] - 0.2
+        if avg < 0.5 and declining:
+            sig, note = "flag", f"Capex/D&A {avg:.2f}× avg and declining — severely underinvesting; business may be in harvest mode"
+        elif avg < 0.8:
+            sig, note = "warn", f"Capex/D&A {avg:.2f}× avg — investing less than assets depreciate; acceptable for software, concerning for capital-intensive sectors"
+        else:
+            sig, note = "ok", f"Capex/D&A {avg:.2f}× avg — reinvesting adequately relative to asset base"
+        results.append({"label": "Capex vs depreciation", "signal": sig,
+                        "value": f"{avg:.2f}× avg ({len(cap_dep)}Y)", "note": note})
+
+    # ── 7. Effective tax rate trend ───────────────────────────────────────────
+    tax_rates = []
+    for inc in income_a[:5]:
+        pt = _s(inc.get("incomeBeforeTax") or inc.get("pretaxIncome"))
+        tx = _s(inc.get("incomeTaxExpense"))
+        if pt and pt > 0 and tx is not None:
+            tax_rates.append(round(tx / pt * 100, 1))
+    if len(tax_rates) >= 3:
+        rate_cur, rate_old = tax_rates[0], tax_rates[-1]
+        chg = rate_cur - rate_old
+        if chg < -8 and rate_cur < 15:
+            sig, note = "flag", f"Tax rate fell {rate_old:.1f}%→{rate_cur:.1f}% — significant tax-driven EPS boost; investigate sustainability"
+        elif chg < -5:
+            sig, note = "warn", f"Tax rate declined {rate_old:.1f}%→{rate_cur:.1f}% — partial EPS uplift from tax reduction"
+        elif rate_cur < 10:
+            sig, note = "warn", f"Effective tax rate only {rate_cur:.1f}% — unusually low; may rely on one-time benefits or tax-haven structures"
+        else:
+            sig, note = "ok", f"Tax rate {rate_cur:.1f}% (was {rate_old:.1f}%) — stable, no artificial EPS boost from tax"
+        results.append({"label": "Tax rate trend", "signal": sig,
+                        "value": f"{rate_cur:.1f}% (was {rate_old:.1f}%)", "note": note})
+
+    return results or None
+
+
 def _build_cap_alloc(raw: dict) -> dict | None:
     """Per-$1,000-OCF capital allocation breakdown from the most recent annual filing."""
     cf_a = raw.get("cashflow_annual") or []
@@ -797,10 +973,11 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
 
     filled = sum(1 for v in result.values() if v)
     log.info("Step4 parsed %d/6 sections for %s", filled, ticker)
-    result["_per1000"]         = per1000
-    result["_cap_alloc"]       = _build_cap_alloc(raw)       if raw else None
-    result["_margin_trend"]    = _build_margin_trend(raw)    if raw else None
-    result["_earnings_quality"]= _build_earnings_quality(raw) if raw else None
+    result["_per1000"]          = per1000
+    result["_cap_alloc"]        = _build_cap_alloc(raw)        if raw else None
+    result["_margin_trend"]     = _build_margin_trend(raw)     if raw else None
+    result["_earnings_quality"] = _build_earnings_quality(raw) if raw else None
+    result["_growth_quality"]   = _build_growth_quality(raw)   if raw else None
     return result
 
 

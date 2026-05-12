@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=11">
+<link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -720,6 +720,30 @@
       {% endif %}
       {% if ca.year %}&nbsp;·&nbsp; FY{{ ca.year }}{% endif %}
     </div>
+  </div>
+</section>
+{% endif %}
+
+<!-- MANUFACTURED GROWTH CHECKS -->
+{% set gq = report.ai_step4._growth_quality if report.ai_step4 else none %}
+{% if gq %}
+<section class="card">
+  <h2>Manufactured growth detector</h2>
+  <p class="sub">Seven forensic signals separating genuine growth from financial engineering. <em>Flagged items warrant deeper investigation in the 10-K MD&A and footnotes.</em></p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Check</th><th>Signal</th><th>Value</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for c in gq %}
+    <tr>
+      <th style="white-space:nowrap">{{ c.label }}</th>
+      <td><span class="sev sev-{{ 'high' if c.signal == 'flag' else 'medium' if c.signal == 'warn' else 'low' }}">{{ c.signal }}</span></td>
+      <td class="qval {{ 'bad' if c.signal == 'flag' else 'warn' if c.signal == 'warn' else 'great' }}" style="white-space:nowrap">{{ c.value }}</td>
+      <td class="hint">{{ c.note }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
   </div>
 </section>
 {% endif %}
