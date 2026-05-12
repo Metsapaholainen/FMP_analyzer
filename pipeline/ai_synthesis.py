@@ -439,6 +439,19 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     if flag_lines:
         context_block += "RED FLAGS:\n" + "\n".join(flag_lines) + "\n\n"
 
+    # ── Growth sources from pillar points ────────────────────────────────────
+    growth_pillar = (fundamental_analysis.get("pillars") or {}).get("growth") or {}
+    _CAGR_LABELS = {"Revenue CAGR", "EPS CAGR 5Y", "FCF CAGR 5Y", "Growth trend"}
+    growth_source_lines = [
+        f"  {pt['label'].strip()}: {pt['value']} — {pt['note']}"
+        for pt in (growth_pillar.get("points") or [])
+        if pt.get("label", "").strip() not in _CAGR_LABELS
+        and pt.get("value") and pt["value"] not in ("—", "")
+    ]
+    if growth_source_lines:
+        context_block += "GROWTH SOURCES (use these for the GROWTH pillar analysis):\n"
+        context_block += "\n".join(growth_source_lines) + "\n\n"
+
     prompt = (
         f"You are a strict equity analyst. Write a specific, insightful Step 4 assessment "
         f"for {ticker} ({name}), a {sector} / {industry} company.\n\n"
@@ -451,6 +464,12 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         "- Reference the peer comparison or segment data when relevant\n"
         "- If something is weak, say so directly\n"
         "- Never use vague filler like 'the company performs well'\n\n"
+        "For GROWTH specifically, address the four sources of growth:\n"
+        "  (1) Volume — selling more of existing products (organic revenue growth)\n"
+        "  (2) Pricing — are gross margins expanding, stable, or contracting vs history?\n"
+        "  (3) New products/services — are new segments appearing in revenue breakdown?\n"
+        "  (4) M&A — does goodwill growth indicate acquisition-driven revenue?\n"
+        "Identify which sources are driving growth and which are absent.\n\n"
         "Reply in EXACT format:\n\n"
         "GROWTH\n[2-3 sentences]\n\n"
         "PROFITABILITY\n[2-3 sentences]\n\n"

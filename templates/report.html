@@ -330,11 +330,33 @@
   {% if v.analyst %}
   <h3>Analyst consensus</h3>
   <div class="kvgrid">
+    {% set price = report.fundamentals.snapshot.price %}
+    {% if price %}
+    <div><span>Current price</span><strong>${{ num(price) }}</strong></div>
+    {% endif %}
     {% if v.analyst.target_consensus is not none %}
-    <div><span>Consensus target</span><strong>${{ num(v.analyst.target_consensus) }}</strong></div>
+    {% set upside = ((v.analyst.target_consensus - price) / price * 100) if price else none %}
+    <div>
+      <span>Consensus target</span>
+      <strong>${{ num(v.analyst.target_consensus) }}</strong>
+      {% if upside is not none %}
+      <span style="font-size:0.8rem;margin-top:2px;color:{{ 'var(--good)' if upside >= 0 else 'var(--bad)' }}">
+        {{ '%+.1f'|format(upside) }}% vs current
+      </span>
+      {% endif %}
+    </div>
     {% endif %}
     {% if v.analyst.target_median is not none %}
-    <div><span>Median target</span><strong>${{ num(v.analyst.target_median) }}</strong></div>
+    {% set upside_med = ((v.analyst.target_median - price) / price * 100) if price else none %}
+    <div>
+      <span>Median target</span>
+      <strong>${{ num(v.analyst.target_median) }}</strong>
+      {% if upside_med is not none %}
+      <span style="font-size:0.8rem;margin-top:2px;color:{{ 'var(--good)' if upside_med >= 0 else 'var(--bad)' }}">
+        {{ '%+.1f'|format(upside_med) }}% vs current
+      </span>
+      {% endif %}
+    </div>
     {% endif %}
     {% if v.analyst.target_high is not none %}
     <div><span>High / Low target</span><strong>${{ num(v.analyst.target_high) }} / ${{ num(v.analyst.target_low) }}</strong></div>

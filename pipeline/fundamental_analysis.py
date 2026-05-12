@@ -30,7 +30,121 @@ def _verdict_from_pct(pct: float, thresholds: list[tuple[float, str]]) -> str:
     return thresholds[-1][1]
 
 
-def _pillar_growth(fundamentals: dict) -> dict:
+def _growth_sources(fundamentals: dict, raw: dict | None) -> list[dict]:
+    """Compute informational growth-source data points (no score impact)."""
+    m = fundamentals.get("metrics") or {}
+    sources: list[dict] = []
+
+    # ── Pricing power: gross margin current vs 10Y average ──────────────────
+    gm = m.get("gross_margin") or {}
+    gm_cur = _safe(gm.get("current"))
+    gm_avg = _safe(gm.get("avg_10y"))
+    if gm_cur is not None and gm_avg is not None:
+        diff_pp = (gm_cur - gm_avg) * 100
+        if diff_pp >= 3:
+            pricing_note = f"expanding (+{diff_pp:.1f}pp vs 10Y avg) — pricing power likely contributing"
+        elif diff_pp <= -3:
+            pricing_note = f"contracting ({diff_pp:.1f}pp vs 10Y avg) — margin pressure, pricing headwind"
+        else:
+            pricing_note = f"stable ({diff_pp:+.1f}pp vs 10Y avg)"
+        sources.append({"label": "Pricing power", "value": _pct_fmt(gm_cur), "note": f"gross margin {pricing_note}"})
+
+    if not raw:
+        return sources
+
+    # ── M&A / acquisitions: goodwill growth from balance sheets ─────────────
+    balance = raw.get("balance_annual") or []
+    gw_vals = []
+    for row in balance[:6]:
+        gw = _safe(row.get("goodwill") or row.get("goodwillAndIntangibleAssets"))
+        if gw is not None and gw >= 0:
+            gw_vals.append(gw)
+    if len(gw_vals) >= 2:
+        gw_new, gw_old = gw_vals[0], gw_vals[-1]
+        if gw_new == 0 and gw_old == 0:
+            ma_note = "no goodwill on balance sheet — organic growth only"
+        elif gw_old == 0 and gw_new > 0:
+            ma_note = f"goodwill appeared (${gw_new/1e9:.1f}B) — first significant acquisition in period"
+        elif gw_old > 0:
+            gw_growth = (gw_new / gw_old) - 1
+            if gw_growth >= 0.30:
+                ma_note = f"goodwill +{gw_growth*100:.0f}% over {len(gw_vals)-1}Y — significant acquisition activity"
+            elif gw_growth >= 0.10:
+                ma_note = f"goodwill +{gw_growth*100:.0f}% over {len(gw_vals)-1}Y — moderate M&A contribution"
+            elif gw_growth >= -0.05:
+                ma_note = f"goodwill stable (+{gw_growth*100:.0f}%) over {len(gw_vals)-1}Y — largely organic growth"
+            else:
+                ma_note = f"goodwill declined {gw_growth*100:.0f}% over {len(gw_vals)-1}Y — disposals or impairments"
+        else:
+            ma_note = "goodwill data limited"
+        gw_display = f"${gw_new/1e9:.1f}B" if gw_new >= 1e9 else f"${gw_new/1e6:.0f}M"
+        sources.append({"label": "M&A / acquisitions", "value": gw_display, "note": ma_note})
+
+    # ── Segment growth contributions ─────────────────────────────────────────
+    prod_segs = raw.get("segments_product") or []
+    if prod_segs:
+        _SKIP = {"date", "symbol", "fiscalYear", "period", "reportedCurrency", "cik", "fillingDate"}
+
+        def _seg_data(row: dict) -> dict[str, float]:
+            data = row.get("data") if isinstance(row.get("data"), dict) else None
+            if data is None:
+                data = {k: v for k, v in row.items() if k not in _SKIP and isinstance(v, (int, float))}
+            return {k: float(v) for k, v in (data or {}).items() if v and float(v) > 0}
+
+        new_data = _seg_data(prod_segs[0])
+        new_date = (prod_segs[0].get("date") or "")[:4]
+
+        # Compare against ~3 years ago (or oldest available)
+        idx_old  = min(3, len(prod_segs) - 1)
+        old_data = _seg_data(prod_segs[idx_old]) if len(prod_segs) > 1 else {}
+        old_date = (prod_segs[idx_old].get("date") or "")[:4] if len(prod_segs) > 1 else ""
+        period_label = f"{old_date}→{new_date}" if old_date and new_date else "recent"
+
+        total_new = sum(new_data.values())
+        total_old = sum(old_data.values())
+        total_delta = total_new - total_old
+
+        if new_data and total_new > 0:
+            common = set(new_data) & set(old_data)
+            new_only = set(new_data) - set(old_data)
+            gone     = set(old_data) - set(new_data)
+
+            rows: list[tuple[float, str, str, str]] = []  # (sort_key, label, value, note)
+            growing = total_delta > 0
+
+            for seg in sorted(new_data, key=lambda s: new_data[s], reverse=True)[:6]:
+                pct_rev = new_data[seg] / total_new
+                value_str = f"{pct_rev * 100:.0f}% of rev"
+                if seg in common and old_data[seg] > 0:
+                    delta = new_data[seg] - old_data[seg]
+                    seg_growth_pct = delta / old_data[seg] * 100
+                    if abs(total_delta) > 0:
+                        contribution = delta / total_delta * 100
+                        if growing:
+                            note = f"contributed {contribution:.0f}% of {period_label} growth (seg +{seg_growth_pct:.0f}%)"
+                        else:
+                            note = f"contributed {contribution:.0f}% of {period_label} decline (seg {seg_growth_pct:+.0f}%)"
+                    else:
+                        note = f"seg {seg_growth_pct:+.0f}% over {period_label}"
+                elif seg in new_only:
+                    note = f"new segment (appeared after {old_date})"
+                else:
+                    note = f"{pct_rev * 100:.0f}% of revenue"
+                rows.append((new_data[seg], seg, value_str, note))
+
+            if rows:
+                n_segs = len(new_data)
+                header_note = f"{period_label} comparison, {n_segs} segment{'s' if n_segs != 1 else ''}"
+                if gone:
+                    header_note += f"; removed: {', '.join(sorted(gone)[:2])}"
+                sources.append({"label": "Segment breakdown", "value": f"{n_segs} segments", "note": header_note})
+                for _, seg_name, val, note in rows:
+                    sources.append({"label": f"  {seg_name}", "value": val, "note": note})
+
+    return sources
+
+
+def _pillar_growth(fundamentals: dict, raw: dict | None = None) -> dict:
     g = fundamentals.get("growth") or {}
     m = fundamentals.get("metrics") or {}
 
@@ -81,6 +195,7 @@ def _pillar_growth(fundamentals: dict) -> dict:
         {"label": "FCF CAGR 5Y",  "value": _pct_fmt(fcf5),  "note": "free cash flow growth"},
         {"label": "Growth trend",  "value": trend_note,      "note": "3Y vs 5Y revenue acceleration"},
     ]
+    points += _growth_sources(fundamentals, raw)
 
     verdict = _verdict_from_pct(score / 20, [
         (0.80, "Rapid compounder"),
@@ -299,10 +414,11 @@ def build_fundamental_analysis(
     red_flags: list,
     ceo: dict | None,
     competition: dict | None,
+    raw: dict | None = None,
 ) -> dict:
     """Assemble 5-pillar business quality scorecard from existing pipeline outputs."""
     pillars = {
-        "growth":           _pillar_growth(fundamentals),
+        "growth":           _pillar_growth(fundamentals, raw),
         "profitability":    _pillar_profitability(fundamentals),
         "financial_health": _pillar_financial_health(fundamentals),
         "risks":            _pillar_risks(red_flags, competition),
