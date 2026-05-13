@@ -25,19 +25,31 @@ def _safe(v) -> float | None:
         return None
 
 
-def _wacc(beta: float | None, sector: str | None) -> float:
-    """Simple WACC heuristic: 4.5% risk-free + beta * 5.5% ERP, floored/capped."""
-    rf = 0.045
+_EU_COUNTRIES = {
+    "FI", "SE", "NO", "DK", "DE", "FR", "NL", "GB", "AT", "BE", "CH",
+    "ES", "IT", "PT", "IE", "LU", "PL", "CZ", "HU", "EE", "LV", "LT",
+}
+
+
+def _wacc(beta: float | None, sector: str | None, country: str | None = None) -> float:
+    """CAPM WACC: Rf + β × ERP.
+
+    Uses European Bund rate (~2.8%) for EU-domiciled companies vs US Treasury
+    (~4.5%) for all others. Floored at 5%, capped at 14%.
+    """
+    # Country-aware risk-free rate
+    c = (country or "US").upper()
+    rf = 0.028 if c in _EU_COUNTRIES else 0.045
     erp = 0.055
     b = beta if beta is not None else 1.0
     b = max(0.5, min(2.0, b))
     wacc = rf + b * erp
-    # Sector adjustments
+    # Sector adjustments (mild)
     if sector in {"Utilities", "Real Estate"}:
         wacc -= 0.005
     if sector in {"Technology", "Communication Services"}:
         wacc += 0.005
-    return max(0.06, min(0.14, wacc))
+    return max(0.05, min(0.14, wacc))
 
 
 def _dcf(fcf_base: float, growth: float, wacc: float, terminal_g: float = 0.025,
@@ -146,7 +158,7 @@ def build_valuation(raw: dict, fundamentals: dict) -> dict:
                 g = 0.05
             g = max(-0.05, min(0.20, g))
 
-            wacc = _wacc(beta, sector)
+            wacc = _wacc(beta, sector, country=snap.get("country"))
             equity_value = _dcf(fcf_base, g, wacc) + cash - total_debt
             iv_per_share = equity_value / shares if shares > 0 else None
 

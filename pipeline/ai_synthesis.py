@@ -303,6 +303,8 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
     # Explicitly anchor key financials so the model cannot hallucinate revenue,
     # market cap, or other headline numbers from training data.
     _ey = snapshot.get("earnings_yield")
+    _dcf = valuation.get("dcf") or {}
+    _wacc_val = _dcf.get("wacc")
     verified_financials = {
         k: v for k, v in {
             "revenue_ttm":        snapshot.get("revenue_ttm"),
@@ -317,6 +319,9 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
             "pe_ratio_ttm":       snapshot.get("pe_ratio"),
             "eps_diluted_ttm":    snapshot.get("eps_ttm"),
             "earnings_yield_pct": round(_ey * 100, 2) if _ey else None,
+            # WACC: computed via CAPM using this company's beta and country.
+            # USE THIS FIGURE — do NOT substitute a generic sector WACC from training data.
+            "wacc_capm_pct":      round(_wacc_val * 100, 1) if _wacc_val else None,
         }.items() if v is not None
     }
 
@@ -490,7 +495,10 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         "Example: price=$14.63 does NOT mean P/E=14.6×; pe_ratio_ttm=64.6 means P/E=64.6×.\n"
         "3. If pe_ratio_ttm > 40× for a cyclical/transition company, label it 'trough P/E — uninformative' "
         "and pivot to FCF yield and ROIC-recovery scenarios instead.\n"
-        "4. eps_diluted_ttm is real EPS — do NOT infer it from net income ÷ shares.\n\n"
+        "4. eps_diluted_ttm is real EPS — do NOT infer it from net income ÷ shares.\n"
+        "5. wacc_capm_pct in VERIFIED_FINANCIALS is the computed cost of capital (CAPM, company-specific "
+        "beta, country-adjusted risk-free rate). USE THIS figure when discussing ROIC spreads or "
+        "valuation — do NOT substitute a generic sector WACC from training-data memory.\n\n"
         f"{news_block}{analyst_block}{seg_block}{sec_block}{sm_block}"
         f"{synth_block}"
         f"SCORECARD:\n```json\n{json.dumps(scorecard, indent=2, default=str)}\n```\n"
@@ -516,7 +524,13 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         "reasonable if ROIC recovers to X% within Y years; unattractive if ROIC stays at Z%.' "
         "Do NOT say 'no margin of safety' without this scenario framing. "
         "For infrastructure/transition companies, explicitly note whether the market is pricing in "
-        "a mix-shift benefit or a return to historical margins — and whether that's achievable.\n"
+        "a mix-shift benefit or a return to historical margins — and whether that's achievable. "
+        "SUM-OF-PARTS FLAG: If the company has a high-margin licensing, IP, or SaaS-like division "
+        "embedded inside a lower-margin hardware/services business (e.g. a patent licensing unit "
+        "with 60%+ gross margins, a cloud segment growing >30%, or a standards/royalty business), "
+        "add a brief 'Hidden asset' note: estimate the division's standalone value range using "
+        "a plausible EV/EBITDA multiple for that business type, and state what % of current "
+        "market cap it represents. Only include if a material division is identifiable from the data.\n"
         + (
             "\n## Hypothesis verdict\n"
             "Evaluate the user's stated moat hypothesis point-by-point against the scorecard. "
@@ -1555,6 +1569,7 @@ def _build_roic_wacc_trend(raw: dict, fundamentals: dict | None, ceo: dict | Non
     return {
         "rows":           rows,
         "wacc_pct":       wacc_pct,
+        "wacc_method":    (ceo or {}).get("wacc_method", "sector average"),
         "current_roic":   cur_roic,
         "current_spread": cur_spread,
         "current_spread_q": cur_spread_q,

@@ -518,7 +518,7 @@
 {% if rw %}
 <section class="card">
   <h2>Return on invested capital vs cost of capital</h2>
-  <p class="sub">ROIC = profit the business earns on every dollar invested in it. WACC = what investors require as a return. When ROIC &gt; WACC the company creates value; when ROIC &lt; WACC it destroys it.</p>
+  <p class="sub">ROIC = profit the business earns on every dollar invested in it. WACC = what investors require as a return. When ROIC &gt; WACC the company creates value; when ROIC &lt; WACC it destroys it. WACC is estimated via CAPM using this company's beta and a country-adjusted risk-free rate — not a generic sector average.</p>
 
   {# Summary strip #}
   <div class="cashgen-strip" style="margin-bottom:18px">
@@ -533,7 +533,7 @@
     <div class="cashgen-cell">
       <span class="cashgen-label">WACC (cost of capital)</span>
       <strong class="cashgen-val">{{ rw.wacc_pct }}%</strong>
-      <span class="cashgen-note">sector-based estimate</span>
+      <span class="cashgen-note">{{ rw.wacc_method if rw.wacc_method else 'sector average' }}</span>
     </div>
     {% endif %}
     {% if rw.current_spread is not none %}
@@ -1309,7 +1309,7 @@
     </div>
     <div>
       <strong>{{ report.ceo.verdict }}</strong>
-      {% if report.ceo.ceo_name %}<p class="hint" style="margin:2px 0 0">CEO: {{ report.ceo.ceo_name }} · WACC est. {{ "%.1f"|format(report.ceo.wacc_used*100) }}%</p>{% endif %}
+      {% if report.ceo.ceo_name %}<p class="hint" style="margin:2px 0 0">CEO: {{ report.ceo.ceo_name }} · WACC {{ "%.1f"|format(report.ceo.wacc_used*100) }}% <span style="font-weight:400;opacity:.75">({{ report.ceo.wacc_method if report.ceo.wacc_method else 'sector avg' }})</span></p>{% endif %}
     </div>
   </div>
   <div class="tablewrap">

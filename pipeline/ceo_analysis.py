@@ -27,7 +27,7 @@ def _note(pts, max_pts, text) -> dict:
     return {"points": round(pts, 1), "max": max_pts, "note": text}
 
 
-# Sector-estimated WACC used when no company-specific estimate is available.
+# Sector-estimated WACC — fallback when beta is unavailable.
 _SECTOR_WACC = {
     "Technology": 0.09,
     "Healthcare": 0.08,
@@ -43,12 +43,68 @@ _SECTOR_WACC = {
 }
 _DEFAULT_WACC = 0.085
 
+# CAPM parameters
+_ERP = 0.055  # Equity risk premium (Damodaran long-run)
+# European companies typically use a lower risk-free rate (German Bund proxy)
+_EUROPEAN_COUNTRIES = {
+    "FI", "SE", "NO", "DK", "DE", "FR", "NL", "GB", "AT", "BE", "CH",
+    "ES", "IT", "PT", "IE", "LU", "PL", "CZ", "HU", "EE", "LV", "LT",
+}
+
+
+def _compute_wacc(snap: dict) -> tuple[float, str]:
+    """Compute company-specific WACC using CAPM when beta is available.
+
+    Uses country-aware risk-free rate (European Bund ~2.8% vs US Treasury ~4.5%),
+    and adjusts for net-cash companies (no debt cost penalty).
+
+    Returns (wacc_decimal, method_label).
+    """
+    sector = snap.get("sector") or ""
+    sector_default = _SECTOR_WACC.get(sector, _DEFAULT_WACC)
+
+    beta = _safe(snap.get("beta"))
+    if beta is None or beta <= 0 or beta > 4:
+        return sector_default, "sector average"
+
+    # Risk-free rate: lower for European-domiciled companies
+    country = (snap.get("country") or "US").upper()
+    rf = 0.028 if country in _EUROPEAN_COUNTRIES else 0.045
+
+    # CAPM cost of equity
+    cost_of_equity = rf + beta * _ERP
+
+    # Leverage: use balance-sheet figures already in snap
+    total_debt = _safe(snap.get("total_debt")) or 0.0
+    cash       = _safe(snap.get("cash_and_equivalents")) or 0.0
+    equity     = _safe(snap.get("total_equity")) or 0.0
+    net_debt   = total_debt - cash
+
+    if net_debt <= 0 or equity <= 0:
+        # Net-cash company — no debt cost component; WACC = Ke
+        wacc   = cost_of_equity
+        method = f"CAPM (β={beta:.2f}, net cash, Rf={rf*100:.1f}%)"
+    else:
+        # Blend equity and after-tax debt cost
+        firm_value = equity + total_debt
+        eq_w = equity     / firm_value
+        d_w  = total_debt / firm_value
+        # Credit spread: 150 bps IG (D/E < 0.5) else 250 bps
+        de_ratio = total_debt / max(equity, 1.0)
+        spread   = 0.015 if de_ratio < 0.5 else 0.025
+        cost_of_debt = (rf + spread) * 0.75   # 25% tax shield
+        wacc   = eq_w * cost_of_equity + d_w * cost_of_debt
+        method = f"CAPM (β={beta:.2f}, Rf={rf*100:.1f}%)"
+
+    # Floor at 5%
+    wacc = max(round(wacc, 4), 0.05)
+    return wacc, method
+
 
 def build_ceo_analysis(raw: dict, fundamentals: dict, moat: dict) -> dict:
-    """Returns {score, max_score, verdict, components, ceo_name, wacc_used}."""
+    """Returns {score, max_score, verdict, components, ceo_name, wacc_used, wacc_method}."""
     snap = fundamentals["snapshot"]
-    sector = snap.get("sector") or ""
-    wacc = _SECTOR_WACC.get(sector, _DEFAULT_WACC)
+    wacc, wacc_method = _compute_wacc(snap)
 
     km_a = listify(raw.get("key_metrics_annual"))
     km_ttm = first(raw.get("key_metrics_ttm"))
@@ -264,7 +320,8 @@ def build_ceo_analysis(raw: dict, fundamentals: dict, moat: dict) -> dict:
     if max_possible < 10:
         return {
             "score": 0, "max_score": 50, "verdict": "Insufficient data",
-            "components": components, "ceo_name": snap.get("ceo"), "wacc_used": wacc,
+            "components": components, "ceo_name": snap.get("ceo"),
+            "wacc_used": wacc, "wacc_method": wacc_method,
         }
 
     # Scale to 50
@@ -287,4 +344,5 @@ def build_ceo_analysis(raw: dict, fundamentals: dict, moat: dict) -> dict:
         "components": components,
         "ceo_name": snap.get("ceo"),
         "wacc_used": wacc,
+        "wacc_method": wacc_method,
     }
