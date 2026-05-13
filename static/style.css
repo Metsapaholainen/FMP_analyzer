@@ -818,9 +818,40 @@ footer { margin-top: 30px; }
   /* ── Hide interactive chrome ─────────────── */
   .btn-print,
   #chat-form,
-  #chat-messages,
-  section:has(#chat-form),
+  #chat-cost,
   .header-toprow a            { display: none !important; }
+
+  /* Hide the whole chat section if no messages were exchanged */
+  section:has(#chat-messages:empty) { display: none !important; }
+
+  /* ── Chat bubbles in print ───────────────── */
+  /* Allow all messages to show (remove scroll cap) */
+  #chat-messages {
+    max-height: none !important;
+    overflow: visible !important;
+    gap: 8px !important;
+  }
+  .chat-bubble {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    font-size: 0.88rem !important;
+    line-height: 1.5 !important;
+  }
+  .chat-bubble.user {
+    background: #dbeafe !important;   /* light blue */
+    color: #1e3a5f !important;
+    align-self: flex-end !important;
+  }
+  .chat-bubble.assistant {
+    background: #f1f5f9 !important;   /* light grey */
+    color: #1a1a2e !important;
+    align-self: flex-start !important;
+  }
+  .chat-bubble .meta {
+    color: #64748b !important;
+    font-size: 0.68rem !important;
+  }
+  .chat-bubble.user .meta { color: #3b6491 !important; }
 
   /* ── Footer ──────────────────────────────── */
   footer { margin-top: 10px !important; border-top: 1px solid #d1d5db !important; padding-top: 6px !important; }
