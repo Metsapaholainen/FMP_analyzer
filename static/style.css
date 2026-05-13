@@ -541,12 +541,12 @@ table.ts-signals td {
 }
 table.ts-signals th {
   font-weight: 600;
-  color: var(--text);
+  color: var(--fg);
   width: 28%;
 }
 table.ts-signals tr:last-child th,
 table.ts-signals tr:last-child td { border-bottom: none; }
-.ts-val { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+.ts-val { font-variant-numeric: tabular-nums; color: var(--fg); font-weight: 600; }
 .ts-pts { font-variant-numeric: tabular-nums; font-weight: 600; }
 .ts-pts.great { color: var(--good); }
 .ts-pts.good  { color: #86efac; }
@@ -618,7 +618,7 @@ table.guidance-tracker td:first-child { width: 40%; }
 .bb-section-title {
   font-size: 0.9rem;
   font-weight: 700;
-  color: var(--text);
+  color: var(--fg);
   letter-spacing: 0.02em;
 }
 .bb-subtitle {
@@ -743,7 +743,7 @@ table.guidance-tracker td:first-child { width: 40%; }
 .bb-claim {
   font-size: 0.81rem;
   font-weight: 600;
-  color: var(--text);
+  color: var(--fg);
   line-height: 1.35;
   margin-bottom: 4px;
 }
@@ -772,7 +772,7 @@ table.guidance-tracker td:first-child { width: 40%; }
 }
 .bb-thesis-text {
   font-size: 0.82rem;
-  color: var(--text);
+  color: var(--fg);
   line-height: 1.65;
 }
 
@@ -1097,7 +1097,6 @@ footer { margin-top: 30px; }
 /* "What to Watch" numbered list — priority cards */
 ol.ai-watch-list {
   list-style: none;
-  counter-reset: watch-ctr;
   margin: 10px 0 0;
   padding: 0;
   display: flex;
@@ -1105,7 +1104,6 @@ ol.ai-watch-list {
   gap: 8px;
 }
 ol.ai-watch-list li {
-  counter-increment: watch-ctr;
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -1117,8 +1115,9 @@ ol.ai-watch-list li {
   line-height: 1.55;
   font-size: 0.84rem;
 }
+/* Use Python-injected data-n so numbering survives </ol><ol> list breaks */
 ol.ai-watch-list li::before {
-  content: counter(watch-ctr);
+  content: attr(data-n);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1132,11 +1131,11 @@ ol.ai-watch-list li::before {
   flex-shrink: 0;
   margin-top: 1px;
 }
-/* First watch item gets a slightly more prominent left border */
-ol.ai-watch-list li:first-child {
+/* First watch item (data-n="1") gets amber accent */
+ol.ai-watch-list li[data-n="1"] {
   border-left-color: #f5b942;
 }
-ol.ai-watch-list li:first-child::before {
+ol.ai-watch-list li[data-n="1"]::before {
   background: #f5b942;
 }
 

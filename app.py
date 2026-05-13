@@ -116,6 +116,7 @@ def _narrative_html(text: str) -> str:
     out_lines: list[str] = []
     in_ul = False
     in_ol = False
+    ol_counter = 0  # persists across </ol><ol> breaks so numbering is always correct
 
     for raw in text.split("\n"):
         line = raw.rstrip()
@@ -160,7 +161,8 @@ def _narrative_html(text: str) -> str:
             if in_ul: out_lines.append("</ul>"); in_ul = False
             if not in_ol:
                 out_lines.append('<ol class="ai-watch-list">'); in_ol = True
-            out_lines.append(f"<li>{_html.escape(content)}</li>")
+            ol_counter += 1  # increment globally so counter survives </ol><ol> splits
+            out_lines.append(f'<li data-n="{ol_counter}">{_html.escape(content)}</li>')
             continue
 
         if in_ul: out_lines.append("</ul>"); in_ul = False
