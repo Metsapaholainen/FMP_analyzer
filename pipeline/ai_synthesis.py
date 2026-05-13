@@ -968,6 +968,106 @@ def _build_cash_gen(fundamentals: dict | None) -> dict | None:
     }
 
 
+def _build_interest_trend(raw: dict) -> dict | None:
+    """Year-by-year times-interest-earned (TIE) trend.
+
+    Shows EBIT, interest expense, coverage ratio and interest as % of revenue
+    for up to 8 years. Also returns a summary strip of current-year figures.
+    """
+    income_a = raw.get("income_annual") or []
+    if not income_a:
+        return None
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    def _bn(v):
+        if v is None:
+            return None
+        a = abs(v)
+        if a >= 1e9:  return round(v / 1e9, 2)
+        if a >= 1e6:  return round(v / 1e6, 4)
+        return round(v, 2)
+
+    def _tie_q(v):
+        if v is None:   return ""
+        if v >= 10:     return "great"
+        if v >= 5:      return "good"
+        if v >= 2:      return "warn"
+        if v >= 0:      return "bad"
+        return "critical"   # negative EBIT — can't cover at all
+
+    rows = []
+    for inc in income_a[:8]:
+        year = str(inc.get("calendarYear") or (inc.get("date") or "")[:4] or "")
+        if not year:
+            continue
+
+        ebit     = _s(inc.get("operatingIncome"))
+        interest = _s(inc.get("interestExpense"))
+        da       = _s(inc.get("depreciationAndAmortization"))
+        rev      = _s(inc.get("revenue"))
+
+        if ebit is None:
+            continue
+
+        # FMP sometimes stores interest expense as negative (expense sign)
+        if interest is not None:
+            interest = abs(interest)
+
+        ebitda = (ebit + da) if (ebit is not None and da is not None) else None
+
+        tie_ebit   = None
+        tie_ebitda = None
+        no_interest = interest is None or interest <= 1_000   # <$1k → treat as no debt
+        if not no_interest:
+            tie_ebit   = round(ebit   / interest, 1) if ebit   is not None else None
+            tie_ebitda = round(ebitda / interest, 1) if ebitda is not None else None
+
+        interest_pct_rev = (
+            round(interest / rev * 100, 2)
+            if (not no_interest and rev and rev > 0) else None
+        )
+
+        rows.append({
+            "year":              year,
+            "ebit_b":            _bn(ebit),
+            "ebitda_b":          _bn(ebitda),
+            "interest_b":        _bn(interest) if not no_interest else None,
+            "interest_pct_rev":  interest_pct_rev,
+            "tie_ebit":          tie_ebit,
+            "tie_ebitda":        tie_ebitda,
+            "tie_q":             _tie_q(tie_ebit),
+            "no_interest":       no_interest,
+        })
+
+    if not rows:
+        return None
+
+    rows.sort(key=lambda r: r["year"], reverse=True)
+
+    # Summary: pull from most recent year
+    cur = rows[0]
+    # Max TIE across all years for trend context
+    tie_vals = [r["tie_ebit"] for r in rows if r["tie_ebit"] is not None]
+    avg_tie  = round(sum(tie_vals) / len(tie_vals), 1) if tie_vals else None
+
+    return {
+        "rows":            rows,
+        "current_tie":     cur["tie_ebit"],
+        "current_tie_q":   cur["tie_q"],
+        "current_interest_b": cur["interest_b"],
+        "current_interest_pct_rev": cur["interest_pct_rev"],
+        "current_ebit_b":  cur["ebit_b"],
+        "avg_tie":         avg_tie,
+        "any_interest":    any(not r["no_interest"] for r in rows),
+    }
+
+
 def _build_roic_wacc_trend(raw: dict, fundamentals: dict | None, ceo: dict | None) -> dict | None:
     """ROIC vs WACC year-by-year: shows whether the business creates value above its cost of capital."""
     income_a = raw.get("income_annual") or []
@@ -1337,6 +1437,7 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     result["_growth_quality"]   = _build_growth_quality(raw)                    if raw else None
     result["_balance_sheet"]    = _build_balance_sheet_viz(raw, fundamentals)          if raw else None
     result["_net_debt_trend"]   = _build_net_debt_trend(raw, fundamentals)             if raw else None
+    result["_interest_trend"]   = _build_interest_trend(raw)                           if raw else None
     result["_roic_wacc"]        = _build_roic_wacc_trend(raw, fundamentals, ceo)      if raw else None
     result["_10k_risks"]        = _extract_10k_risks(raw)                              if raw else None
     return result
