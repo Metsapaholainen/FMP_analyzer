@@ -621,6 +621,25 @@ button:hover { filter: brightness(1.05); }
 .risk10k-operational  .risk10k-cat { color: #a78bfa; }
 .risk10k-macro        .risk10k-cat { color: #60a5fa; }
 
+/* ---- Header top row (back link + print button) ---- */
+.header-toprow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.btn-print {
+  background: var(--card-2);
+  color: var(--mute);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-print:hover { background: var(--border); color: var(--fg); }
+
 /* ---- ROIC vs WACC bar chart ---- */
 .roic-grid { display: flex; flex-direction: column; gap: 5px; }
 .roic-row {
@@ -685,4 +704,89 @@ button:hover { filter: brightness(1.05); }
   text-align: right;
 }
 
+/* ---- TIE 5-column row variant ---- */
+.tie-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 54px 62px 56px;
+  align-items: center;
+  gap: 8px;
+}
+
 footer { margin-top: 30px; }
+
+/* ══════════════════════════════════════════
+   PRINT / PDF  —  switches to light mode
+   ══════════════════════════════════════════ */
+@media print {
+  /* Base colours */
+  :root {
+    --bg: #ffffff;
+    --card: #f4f5f7;
+    --card-2: #e8eaed;
+    --fg: #1a1a2e;
+    --mute: #4a5568;
+    --accent: #2563eb;
+    --good: #16a34a;
+    --warn: #b45309;
+    --bad: #dc2626;
+    --border: #d1d5db;
+  }
+  body { background: #fff; color: #1a1a2e; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* Hide interactive / nav elements */
+  .btn-print,
+  #chat-form,
+  #chat-messages,
+  .header-toprow a { display: none !important; }
+
+  /* Keep cards readable */
+  .card { break-inside: avoid; border: 1px solid #d1d5db; }
+
+  /* Quality colour overrides for light bg */
+  .qval.great, .cashgen-val.great, .bs-fortress-val.great, .roic-pct.great, .roic-spread.great { color: #15803d; }
+  .qval.good,  .cashgen-val.good,  .bs-fortress-val.good,  .roic-pct.good,  .roic-spread.good  { color: #16a34a; }
+  .qval.warn,  .cashgen-val.warn,  .bs-fortress-val.warn,  .roic-pct.warn,  .roic-spread.warn  { color: #b45309; }
+  .qval.bad,   .cashgen-val.bad,   .bs-fortress-val.bad,   .roic-pct.bad,   .roic-spread.bad   { color: #dc2626; }
+  .qval.critical { color: #7c2d12; }
+
+  /* Bar chart backgrounds — keep the inline colours, just ensure opacity */
+  .roic-bar.great { background: #16a34a !important; opacity: 0.8; }
+  .roic-bar.good  { background: #22c55e !important; opacity: 0.8; }
+  .roic-bar.warn  { background: #f59e0b !important; opacity: 0.8; }
+  .roic-bar.bad   { background: #ef4444 !important; opacity: 0.8; }
+
+  /* Per-$1k bars — inline background colours survive print */
+  .per1k-bar-wrap { background: #e8eaed; }
+
+  /* Trend table */
+  .trend-table td, .trend-table th { border-color: #d1d5db; }
+
+  /* Badge colours */
+  .badge.cache, .badge.fresh, .badge { background: #e8eaed !important; color: #4a5568 !important; }
+
+  /* Sev tags */
+  .sev-high   { background: #fecaca; color: #7f1d1d; }
+  .sev-medium { background: #fed7aa; color: #7c2d12; }
+  .sev-low    { background: #d1fae5; color: #064e3b; }
+
+  /* Flag cards */
+  .flag-card.sev-high   { border-left-color: #dc2626; background: #fff5f5; }
+  .flag-card.sev-medium { border-left-color: #f59e0b; background: #fffbeb; }
+  .flag-card.sev-low    { background: #f0fdf4; }
+
+  /* Section headings */
+  h2, h3 { color: #1a1a2e; }
+  .sub, .hint { color: #4a5568; }
+
+  /* Tables */
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #e5e7eb; }
+  thead th { background: #e8eaed; }
+
+  /* Footer */
+  footer { margin-top: 16px; }
+  footer p { color: #6b7280; font-size: 0.75rem; }
+
+  /* Page setup */
+  @page { margin: 15mm 12mm; size: A4 portrait; }
+}

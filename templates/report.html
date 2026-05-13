@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=18">
+<link rel="stylesheet" href="/static/style.css?v=19">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -54,12 +54,20 @@
 
 <main class="wrap">
 <header>
-  <p><a href="/">← New analysis</a></p>
+  <div class="header-toprow">
+    <p><a href="/">← New analysis</a></p>
+    <button class="btn-print" onclick="window.print()" title="Save as PDF">⬇ Save as PDF</button>
+  </div>
   <h1>{{ s.name or report.ticker }} <span class="ticker">({{ report.ticker }})</span></h1>
   <p class="sub">
     {{ s.sector or '—' }} · {{ s.industry or '—' }} · {{ s.exchange or '—' }} · {{ s.country or '—' }}
     {% if report._from_cache %}<span class="badge cache">Cached {{ "%.1f"|format(report._cache_age_days) }}d</span>
     {% else %}<span class="badge fresh">Fresh ({{ "%.1f"|format(report._pipeline_seconds) }}s)</span>{% endif %}
+    {# Most recent fiscal year the financial statements are based on #}
+    {% set _fy = (report.ai_step4._per1000.year if report.ai_step4 and report.ai_step4._per1000 else none)
+              or (report.ai_step4._cap_alloc.year if report.ai_step4 and report.ai_step4._cap_alloc else none) %}
+    {% if _fy %}<span class="badge" style="background:var(--card-2);color:var(--mute)">Financials: FY{{ _fy }}</span>{% endif %}
+    <span class="badge" style="background:var(--card-2);color:var(--mute)">Analysis: {{ report._generated_at[:10] if report._generated_at else 'unknown' }}</span>
   </p>
   <div class="snapshot-grid">
     <div><span>Price</span><strong>${{ num(s.price) }}</strong></div>
@@ -351,30 +359,31 @@
   <div class="cashgen-strip" style="margin-bottom:14px">
     {% if it.current_tie is not none %}
     <div class="cashgen-cell">
-      <span class="cashgen-label">Times covered (EBIT)</span>
+      <span class="cashgen-label">Covered (EBIT)</span>
       <strong class="cashgen-val {{ it.current_tie_q }}">{{ it.current_tie }}×</strong>
-      <span class="cashgen-note">most recent year</span>
+      <span class="cashgen-note">operating profit basis</span>
+    </div>
+    {% endif %}
+    {% if it.current_tie_ebitda is not none %}
+    {% set _eq = 'great' if it.current_tie_ebitda >= 10 else 'good' if it.current_tie_ebitda >= 5 else 'warn' if it.current_tie_ebitda >= 2 else 'bad' %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">Covered (EBITDA)</span>
+      <strong class="cashgen-val {{ _eq }}">{{ it.current_tie_ebitda }}×</strong>
+      <span class="cashgen-note">adds back D&amp;A (fairer for asset-heavy / growth co.)</span>
     </div>
     {% endif %}
     {% if it.avg_tie is not none %}
     <div class="cashgen-cell">
-      <span class="cashgen-label">Avg coverage (5–8Y)</span>
+      <span class="cashgen-label">Avg coverage (EBIT)</span>
       <strong class="cashgen-val {{ 'great' if it.avg_tie >= 10 else 'good' if it.avg_tie >= 5 else 'warn' if it.avg_tie >= 2 else 'bad' }}">{{ it.avg_tie }}×</strong>
-      <span class="cashgen-note">consistency check</span>
+      <span class="cashgen-note">multi-year avg</span>
     </div>
     {% endif %}
     {% if it.current_interest_b is not none %}
     <div class="cashgen-cell">
       <span class="cashgen-label">Annual interest bill</span>
       <strong class="cashgen-val">${{ it.current_interest_b }}B</strong>
-      <span class="cashgen-note">most recent year</span>
-    </div>
-    {% endif %}
-    {% if it.current_ebit_b is not none %}
-    <div class="cashgen-cell">
-      <span class="cashgen-label">Operating profit (EBIT)</span>
-      <strong class="cashgen-val">{{ '$' ~ it.current_ebit_b ~ 'B' if it.current_ebit_b is not none else '—' }}</strong>
-      <span class="cashgen-note">before interest & tax</span>
+      <span class="cashgen-note">FY{{ it.fiscal_year }}</span>
     </div>
     {% endif %}
     {% if it.current_interest_pct_rev is not none %}
@@ -386,46 +395,50 @@
     {% endif %}
   </div>
 
-  {# Year-by-year bar chart — same pattern as ROIC chart #}
+  {# Year-by-year bar chart — 5-column tie-row variant #}
   {% set tie_scale = 20 %}  {# 20× = 100% bar width #}
   <div class="roic-grid">
-    <div class="roic-row roic-header">
+    <div class="tie-row roic-header">
       <span class="roic-year"></span>
       <div class="roic-bar-wrap">
-        {# Danger line at 2× #}
         <div class="roic-wacc-line" style="left:{{ (2 / tie_scale * 100) | round(1) }}%">
           <span class="roic-wacc-label">2× (warn)</span>
         </div>
-        {# Comfort line at 5× #}
         <div class="roic-wacc-line" style="left:{{ (5 / tie_scale * 100) | round(1) }}%;background:#5dd39e;opacity:0.5">
           <span class="roic-wacc-label" style="color:#5dd39e">5× (good)</span>
         </div>
       </div>
-      <span class="roic-pct-hdr">TIE</span>
+      <span class="roic-pct-hdr">EBIT</span>
+      <span class="roic-pct-hdr">EBITDA</span>
       <span class="roic-spread-hdr">Int % rev</span>
     </div>
     {% for row in it.rows %}
-    <div class="roic-row">
+    <div class="tie-row">
       <span class="roic-year">{{ row.year }}</span>
       <div class="roic-bar-wrap">
         {% if not row.no_interest and row.tie_ebit is not none %}
           {% set bar_w = [[row.tie_ebit, 0] | max / tie_scale * 100, 100] | min | round(1) %}
           <div class="roic-bar {{ row.tie_q }}" style="width:{{ bar_w }}%"></div>
         {% endif %}
-        {# Reference lines #}
         <div class="roic-wacc-line" style="left:{{ (2 / tie_scale * 100) | round(1) }}%"></div>
         <div class="roic-wacc-line" style="left:{{ (5 / tie_scale * 100) | round(1) }}%;background:#5dd39e;opacity:0.4"></div>
       </div>
       <span class="roic-pct qval {{ row.tie_q if not row.no_interest else '' }}">
-        {% if row.no_interest %}no debt{% elif row.tie_ebit is not none %}{{ row.tie_ebit }}×{% else %}—{% endif %}
+        {% if row.no_interest %}—{% elif row.tie_ebit is not none %}{{ row.tie_ebit }}×{% else %}—{% endif %}
       </span>
+      {% if not row.no_interest and row.tie_ebitda is not none %}
+      {% set _deq = 'great' if row.tie_ebitda >= 10 else 'good' if row.tie_ebitda >= 5 else 'warn' if row.tie_ebitda >= 2 else 'bad' %}
+      <span class="roic-pct qval {{ _deq }}">{{ row.tie_ebitda }}×</span>
+      {% else %}
+      <span class="roic-pct" style="color:var(--mute)">{% if row.no_interest %}no debt{% else %}—{% endif %}</span>
+      {% endif %}
       <span class="roic-spread" style="color:var(--mute)">
         {{ row.interest_pct_rev ~ '%' if row.interest_pct_rev is not none else '—' }}
       </span>
     </div>
     {% endfor %}
   </div>
-  <p class="hint" style="margin-top:6px">TIE = Operating profit ÷ Interest expense &nbsp;·&nbsp; <span class="qval great" style="padding:1px 5px;border-radius:3px">≥10×</span> <span class="qval good" style="padding:1px 5px;border-radius:3px">≥5×</span> <span class="qval warn" style="padding:1px 5px;border-radius:3px">≥2×</span> <span class="qval bad" style="padding:1px 5px;border-radius:3px">&lt;2×</span> · Uses EBIT (before D&amp;A add-back)</p>
+  <p class="hint" style="margin-top:6px">EBIT = operating profit before interest &amp; tax · EBITDA adds back depreciation &amp; amortisation (better for capital-intensive or growth businesses with large D&amp;A) &nbsp;·&nbsp; <span class="qval great" style="padding:1px 5px;border-radius:3px">≥10×</span> <span class="qval good" style="padding:1px 5px;border-radius:3px">≥5×</span> <span class="qval warn" style="padding:1px 5px;border-radius:3px">≥2×</span> <span class="qval bad" style="padding:1px 5px;border-radius:3px">&lt;2×</span></p>
   {% elif it and not it.any_interest %}
   <p class="hint" style="margin-top:12px">No meaningful interest expense detected — company carries little or no debt.</p>
   {% endif %}

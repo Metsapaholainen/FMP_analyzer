@@ -1056,15 +1056,22 @@ def _build_interest_trend(raw: dict) -> dict | None:
     tie_vals = [r["tie_ebit"] for r in rows if r["tie_ebit"] is not None]
     avg_tie  = round(sum(tie_vals) / len(tie_vals), 1) if tie_vals else None
 
+    avg_tie_ebitda_vals = [r["tie_ebitda"] for r in rows if r["tie_ebitda"] is not None]
+    avg_tie_ebitda = round(sum(avg_tie_ebitda_vals) / len(avg_tie_ebitda_vals), 1) if avg_tie_ebitda_vals else None
+
     return {
-        "rows":            rows,
-        "current_tie":     cur["tie_ebit"],
-        "current_tie_q":   cur["tie_q"],
-        "current_interest_b": cur["interest_b"],
+        "rows":                     rows,
+        "current_tie":              cur["tie_ebit"],
+        "current_tie_ebitda":       cur["tie_ebitda"],
+        "current_tie_q":            cur["tie_q"],
+        "current_interest_b":       cur["interest_b"],
         "current_interest_pct_rev": cur["interest_pct_rev"],
-        "current_ebit_b":  cur["ebit_b"],
-        "avg_tie":         avg_tie,
-        "any_interest":    any(not r["no_interest"] for r in rows),
+        "current_ebit_b":           cur["ebit_b"],
+        "current_ebitda_b":         cur["ebitda_b"],
+        "avg_tie":                  avg_tie,
+        "avg_tie_ebitda":           avg_tie_ebitda,
+        "fiscal_year":              cur["year"],
+        "any_interest":             any(not r["no_interest"] for r in rows),
     }
 
 
