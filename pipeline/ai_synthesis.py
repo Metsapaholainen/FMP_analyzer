@@ -281,16 +281,21 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
 
     # Explicitly anchor key financials so the model cannot hallucinate revenue,
     # market cap, or other headline numbers from training data.
+    _ey = snapshot.get("earnings_yield")
     verified_financials = {
         k: v for k, v in {
-            "revenue_ttm":     snapshot.get("revenue_ttm"),
-            "net_income_ttm":  snapshot.get("net_income_ttm"),
-            "fcf_ttm":         snapshot.get("fcf_ttm"),
-            "market_cap":      snapshot.get("market_cap"),
-            "enterprise_value": snapshot.get("enterprise_value"),
-            "total_debt":      snapshot.get("total_debt"),
-            "cash":            snapshot.get("cash_and_equivalents"),
-            "price":           snapshot.get("price"),
+            "revenue_ttm":        snapshot.get("revenue_ttm"),
+            "net_income_ttm":     snapshot.get("net_income_ttm"),
+            "fcf_ttm":            snapshot.get("fcf_ttm"),
+            "market_cap":         snapshot.get("market_cap"),
+            "enterprise_value":   snapshot.get("enterprise_value"),
+            "total_debt":         snapshot.get("total_debt"),
+            "cash":               snapshot.get("cash_and_equivalents"),
+            "price":              snapshot.get("price"),
+            # Valuation multiples — MUST use these, do NOT infer P/E from price
+            "pe_ratio_ttm":       snapshot.get("pe_ratio"),
+            "eps_diluted_ttm":    snapshot.get("eps_ttm"),
+            "earnings_yield_pct": round(_ey * 100, 2) if _ey else None,
         }.items() if v is not None
     }
 
@@ -459,7 +464,11 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         "distinguish structural vs trailing evidence when both are available.\n\n"
         f"{news_block}{analyst_block}{seg_block}{sec_block}{sm_block}"
         f"{synth_block}"
-        f"SCORECARD:\n```json\n{json.dumps(scorecard, indent=2, default=str)}\n```"
+        f"SCORECARD:\n```json\n{json.dumps(scorecard, indent=2, default=str)}\n```\n"
+        "CRITICAL: Use ONLY the numbers in VERIFIED_FINANCIALS_USE_THESE_NOT_TRAINING_DATA above. "
+        "pe_ratio_ttm is the real computed P/E — do NOT compute P/E from price. "
+        "eps_diluted_ttm is real EPS — do NOT infer from net income / shares. "
+        "The stock price in VERIFIED_FINANCIALS is price-per-share, NOT the P/E ratio.\n"
         f"{transition_block}"
         f"{hypothesis_block}\n\n"
         "OUTPUT FORMAT (markdown, total ~600 words max):\n\n"
@@ -1269,12 +1278,17 @@ def _build_interest_trend(raw: dict) -> dict | None:
             return None
 
     def _bn(v):
+        """Always return value in billions (4 decimal places) so the template
+        label '$XB' is always correct, even for sub-billion interest expenses."""
         if v is None:
             return None
-        a = abs(v)
-        if a >= 1e9:  return round(v / 1e9, 2)
-        if a >= 1e6:  return round(v / 1e6, 4)
-        return round(v, 2)
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            return None
+        if x != x:  # NaN
+            return None
+        return round(x / 1e9, 4)
 
     def _tie_q(v):
         if v is None:   return ""

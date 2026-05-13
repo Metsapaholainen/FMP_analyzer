@@ -491,6 +491,10 @@ def build_fundamentals(raw: dict) -> dict:
         "altman_z_score": altman_z_score,
         "top_segment": top_segment,
         "licensing_segment_pct": licensing_segment_pct,
+        # Valuation multiples — stored here so ai_synthesis can anchor the AI
+        # to real computed values instead of training-data hallucinations.
+        "pe_ratio": metrics["pe"]["current"],
+        "earnings_yield": metrics["earnings_yield"]["current"],
     }
 
     # Write computed TTM dicts back into raw so red_flags / valuation can reuse them

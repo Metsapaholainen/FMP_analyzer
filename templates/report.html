@@ -387,7 +387,13 @@
     {% if it.current_interest_b is not none %}
     <div class="cashgen-cell">
       <span class="cashgen-label">Annual interest bill</span>
-      <strong class="cashgen-val">${{ it.current_interest_b }}B</strong>
+      <strong class="cashgen-val">
+        {%- if it.current_interest_b < 0.01 -%}
+          ${{ (it.current_interest_b * 1000) | round(1) }}M
+        {%- else -%}
+          ${{ it.current_interest_b }}B
+        {%- endif -%}
+      </strong>
       <span class="cashgen-note">FY{{ it.fiscal_year }}</span>
     </div>
     {% endif %}
