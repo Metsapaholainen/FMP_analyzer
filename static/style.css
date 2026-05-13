@@ -453,6 +453,341 @@ button:hover { filter: brightness(1.05); }
 .bs-fortress-val.warn  { color: var(--warn); }
 .bs-fortress-val.bad   { color: var(--bad); }
 
+/* ---- Quarterly momentum / forward estimates acceleration badge ---- */
+.accel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.accel-badge.accelerating { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+.accel-badge.decelerating { background: rgba(248, 113, 113, 0.15); color: var(--bad); border: 1px solid rgba(248,113,113,0.3); }
+.accel-badge.stable       { background: var(--card-2); color: var(--mute); border: 1px solid var(--border); }
+
+/* ---- Step 4: Transition Score panel (forward-looking complement to pillar scoring) ---- */
+.transition-panel {
+  margin: 14px 0 6px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.transition-panel[open] {
+  padding-bottom: 14px;
+}
+.transition-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.transition-summary::-webkit-details-marker { display: none; }
+.transition-summary::before {
+  content: "▸";
+  display: inline-block;
+  color: var(--mute);
+  transition: transform 0.15s;
+  margin-right: 2px;
+}
+.transition-panel[open] .transition-summary::before { transform: rotate(90deg); }
+.ts-label {
+  color: var(--mute);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.ts-score {
+  font-size: 1.15rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.ts-score.great { color: var(--good); }
+.ts-score.good  { color: #86efac; }
+.ts-score.warn  { color: var(--warn); }
+.ts-score.bad   { color: var(--bad); }
+.ts-verdict {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.ts-help {
+  color: var(--mute);
+  cursor: help;
+  font-size: 0.85rem;
+  margin-left: auto;
+}
+.transition-body {
+  margin-top: 10px;
+}
+table.ts-signals {
+  width: 100%;
+  border-collapse: collapse;
+}
+table.ts-signals th,
+table.ts-signals td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+  vertical-align: top;
+}
+table.ts-signals th {
+  font-weight: 600;
+  color: var(--text);
+  width: 28%;
+}
+table.ts-signals tr:last-child th,
+table.ts-signals tr:last-child td { border-bottom: none; }
+.ts-val { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+.ts-pts { font-variant-numeric: tabular-nums; font-weight: 600; }
+.ts-pts.great { color: var(--good); }
+.ts-pts.good  { color: #86efac; }
+.ts-pts.warn  { color: var(--warn); }
+.ts-pts.bad   { color: var(--bad); }
+.ts-note { color: var(--mute); }
+tr.ts-deferred { opacity: 0.55; }
+tr.ts-deferred .ts-pts { color: var(--mute); font-style: italic; font-weight: 500; }
+
+/* ---- Deep-research mode badge (hero strip) ---- */
+.dr-badge { font-size: 0.73rem; padding: 3px 8px; border-radius: 10px; }
+.dr-manual { background: rgba(139, 92, 246, 0.18); color: #a78bfa; border: 1px solid rgba(139,92,246,0.35); }
+.dr-auto   { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3); }
+
+/* ---- Deep-research toggle on index page ---- */
+.deep-research-toggle {
+  margin: 10px 0 8px;
+  padding: 12px 14px;
+  background: rgba(139, 92, 246, 0.07);
+  border: 1px solid rgba(139,92,246,0.25);
+  border-radius: 8px;
+}
+.deep-research-toggle .checkbox-inline { display: flex; align-items: center; gap: 8px; margin: 0; }
+.dr-label { font-weight: 600; color: #a78bfa; font-size: 0.92rem; }
+.dr-hint { margin: 6px 0 0; font-size: 0.78rem; color: var(--mute); line-height: 1.5; }
+
+/* ---- Guidance tracker table (Step 3) ---- */
+table.guidance-tracker {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0 6px;
+  font-size: 0.85rem;
+}
+table.guidance-tracker td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
+table.guidance-tracker td:first-child { width: 40%; }
+.gt-label { color: var(--mute); font-size: 0.8rem; }
+.gt-guidance { font-size: 1.05rem; color: var(--good); }
+.gt-rh {
+  display: inline-block; margin-left: 8px;
+  font-size: 0.72rem; padding: 2px 7px; border-radius: 8px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.gt-raised  { background: rgba(74,222,128,0.15); color: #4ade80; }
+.gt-held    { background: rgba(148,163,184,0.12); color: var(--mute); }
+.gt-lowered { background: rgba(248,113,113,0.15); color: var(--bad); }
+.gt-initiated { background: rgba(56,189,248,0.15); color: #38bdf8; }
+.gt-pending {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; margin-top: 14px;
+  background: var(--card-2); border-radius: 7px; opacity: 0.65;
+  font-size: 0.82rem;
+}
+.gt-pending-label { font-weight: 600; color: var(--mute); }
+.gt-pending-note  { color: var(--mute); }
+.gt-pending-hint  { color: var(--mute); font-size: 0.76rem; font-style: italic; }
+
+/* ---- Bull vs Bear scorecard — Visual card layout ---- */
+.bb-section {
+  margin: 22px 0 10px;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.bb-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.bb-section-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.bb-subtitle {
+  font-size: 0.72rem;
+  color: var(--mute);
+}
+
+/* Balance bar */
+.bb-balance-bar  { margin-bottom: 14px; }
+.bb-balance-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+.bb-lbl-bull { color: var(--good); }
+.bb-lbl-bear { color: var(--bad); }
+.bb-bar-track {
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(239,68,68,.25);
+  overflow: hidden;
+}
+.bb-bar-fill {
+  height: 100%;
+  background: var(--good);
+  border-radius: 4px;
+  transition: width .4s ease;
+}
+
+/* Two-column grid */
+.bb-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+@media (max-width: 640px) { .bb-columns { grid-template-columns: 1fr; } }
+
+.bb-column {
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.bb-bull-col {
+  background: rgba(34,197,94,.07);
+  border: 1px solid rgba(34,197,94,.25);
+}
+.bb-bear-col {
+  background: rgba(239,68,68,.07);
+  border: 1px solid rgba(239,68,68,.25);
+}
+
+.bb-col-header {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.bb-bull-hdr { color: var(--good); }
+.bb-bear-hdr { color: var(--bad); }
+
+/* Individual point */
+.bb-point {
+  display: flex;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.bb-point:last-child { border-bottom: none; padding-bottom: 2px; }
+
+/* Probability ring */
+.bb-prob-ring {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+.bb-prob-bull {
+  background: rgba(34,197,94,.18);
+  color: var(--good);
+  border: 2px solid rgba(34,197,94,.4);
+}
+.bb-prob-bear {
+  background: rgba(239,68,68,.18);
+  color: var(--bad);
+  border: 2px solid rgba(239,68,68,.4);
+}
+
+.bb-point-body  { flex: 1; min-width: 0; }
+
+/* Confidence badge */
+.bb-conf {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 0.63rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: 4px;
+  vertical-align: middle;
+}
+/* Bull-side confidence colours */
+.bb-conf-High   { background: rgba(34,197,94,.2);  color: var(--good); }
+.bb-conf-Medium { background: rgba(251,191,36,.2); color: var(--warn); }
+.bb-conf-Low    { background: rgba(156,163,175,.2); color: var(--mute); }
+/* Bear-side confidence colours */
+.bb-conf-bear-High   { background: rgba(239,68,68,.2);  color: var(--bad); }
+.bb-conf-bear-Medium { background: rgba(251,191,36,.2); color: var(--warn); }
+.bb-conf-bear-Low    { background: rgba(156,163,175,.2); color: var(--mute); }
+
+.bb-claim {
+  font-size: 0.81rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+.bb-evidence {
+  font-size: 0.73rem;
+  color: var(--mute);
+  line-height: 1.45;
+  font-style: italic;
+}
+
+/* Net thesis */
+.bb-thesis {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 13px 15px;
+  margin-top: 4px;
+}
+.bb-thesis-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--mute);
+  margin-bottom: 7px;
+}
+.bb-thesis-text {
+  font-size: 0.82rem;
+  color: var(--text);
+  line-height: 1.65;
+}
+
+/* ---- ai-md h4 (kept for any residual h4 from markdown) ---- */
+.ai-md h4 {
+  margin: 14px 0 6px;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--mute);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.ai-md h4:first-of-type { margin-top: 6px; }
+
 /* ---- Margin trend / earnings quality tables ---- */
 .trend-table th:first-child { width: 60px; }
 .trend-table td { text-align: center; min-width: 90px; }

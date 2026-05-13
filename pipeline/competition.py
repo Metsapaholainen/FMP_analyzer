@@ -212,6 +212,48 @@ def build_competition(raw: dict, fundamentals: dict) -> dict:
     for pt, blob in peer_metrics.items():
         pf = first(blob.get("profile"))
         m = _safe(pf.get("mktCap")) or _safe(pf.get("marketCap"))
+        # FMP sometimes returns mktCap in local currency for non-US listings
+        # (e.g. Ericsson ERIC: FMP labels it "USD" but the value is in SEK).
+        # Cross-validate using price × sharesOutstanding — a reliable USD estimate.
+        peer_price  = _safe(pf.get("price"))
+        peer_shares = _safe(pf.get("sharesOutstanding"))
+        if (m is not None and peer_price and peer_price > 0
+                and peer_shares and peer_shares > 0):
+            reconstructed = peer_price * peer_shares
+            # If reported mktCap is >5× the price×shares reconstruction, it's
+            # almost certainly in a foreign currency (e.g. SEK vs USD ADR price).
+            # Use the reconstructed figure instead.
+            if reconstructed > 0 and m / reconstructed > 5:
+                m = reconstructed
+        # Implied-share-count sanity: if mktCap / price implies > 18B shares,
+        # FMP has almost certainly used an inflated foreign-currency share count
+        # to compute mktCap (and returned the same wrong count in sharesOutstanding,
+        # so the ratio check above fires at ~1.0 and misses it).
+        # Apple ~15B shares is the practical ceiling for any listed company.
+        # Show N/A rather than a wildly wrong number.
+        if (m is not None and peer_price and peer_price > 0
+                and m / peer_price > 18_000_000_000):
+            m = None
+        # Secondary guard: even without price, sharesOutstanding alone reveals the bug.
+        # Ericsson ERIC reports ~33B shares (inflated; real float is ~3.3B).
+        # No listed company has >18B legitimate shares outstanding.
+        if (m is not None and peer_shares and peer_shares > 18_000_000_000):
+            m = None
+        # Tertiary guard: if FMP provides neither price nor shares we cannot
+        # validate the market cap at all — null it rather than display garbage.
+        # (Legitimate large-cap peers like CSCO always have price + shares in FMP.)
+        if m is not None and peer_price is None and peer_shares is None:
+            m = None
+        # Hard currency check: if FMP explicitly says non-USD, null the market cap.
+        # When FMP returns both mktCap and price in SEK (e.g. Ericsson ERIC), the
+        # price×shares reconstruction gives a SEK value that "confirms" the SEK mktCap,
+        # making all per-share checks look consistent — the only reliable guard is currency.
+        peer_currency = (pf.get("currency") or pf.get("reportedCurrency") or "USD").upper()
+        if peer_currency != "USD" and m is not None:
+            m = None   # Cannot reliably convert; show N/A
+        # Sanity check: no company has >$10T market cap
+        if m is not None and m > 10_000_000_000_000:
+            m = None
         if m is not None and m > 0:
             peer_mcaps.append((pt, m))
 

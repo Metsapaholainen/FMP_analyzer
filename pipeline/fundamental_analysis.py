@@ -80,7 +80,51 @@ def _growth_sources(fundamentals: dict, raw: dict | None) -> list[dict]:
         gw_display = f"${gw_new/1e9:.1f}B" if gw_new >= 1e9 else f"${gw_new/1e6:.0f}M"
         sources.append({"label": "M&A / acquisitions", "value": gw_display, "note": ma_note})
 
-    # ── Segment growth contributions ─────────────────────────────────────────
+    # ── Quarterly segment YoY growth (optical vs RAN etc.) ──────────────────
+    seg_q = raw.get("segments_product_quarter") or []
+    _SKIP = {"date", "symbol", "fiscalYear", "period", "reportedCurrency", "cik", "fillingDate"}
+
+    def _seg_data_q(row: dict) -> dict[str, float]:
+        data = row.get("data") if isinstance(row.get("data"), dict) else None
+        if data is None:
+            data = {k: v for k, v in row.items() if k not in _SKIP and isinstance(v, (int, float))}
+        return {k: float(v) for k, v in (data or {}).items() if v and float(v) > 0}
+
+    if len(seg_q) >= 5:
+        cur_q    = _seg_data_q(seg_q[0])
+        prior_q  = _seg_data_q(seg_q[4])   # same quarter one year ago
+        cur_date = (seg_q[0].get("date") or "")[:7]
+        common   = set(cur_q) & set(prior_q)
+        if cur_q and common:
+            total_cur = sum(cur_q.values()) or 1
+            rows_q: list[tuple[float, str, float, float]] = []
+            for seg in cur_q:
+                if seg in common and prior_q[seg] > 0:
+                    yoy = (cur_q[seg] / prior_q[seg] - 1) * 100
+                    pct_rev = cur_q[seg] / total_cur * 100
+                    rows_q.append((cur_q[seg], seg, yoy, pct_rev))
+            rows_q.sort(reverse=True)
+            if rows_q:
+                prior_date = (seg_q[4].get("date") or "")[:7]
+                sources.append({
+                    "label": "Segment YoY (quarterly)",
+                    "value": f"{len(rows_q)} segs",
+                    "note": f"most recent quarter vs same quarter prior year · {cur_date} vs {prior_date}",
+                    "_seg_header": True,
+                })
+                for _, seg_name, yoy, pct_rev in rows_q[:6]:
+                    if yoy >= 10:   seg_q_note = f"{yoy:+.0f}% YoY — strong growth"
+                    elif yoy >= 3:  seg_q_note = f"{yoy:+.0f}% YoY — modest growth"
+                    elif yoy >= -3: seg_q_note = f"{yoy:+.0f}% YoY — flat"
+                    else:           seg_q_note = f"{yoy:+.0f}% YoY — declining"
+                    sources.append({
+                        "label": seg_name,
+                        "value": f"{pct_rev:.0f}% of rev",
+                        "note": seg_q_note,
+                        "_seg_row": True,
+                    })
+
+    # ── Annual segment growth contributions ──────────────────────────────────
     prod_segs = raw.get("segments_product") or []
     if prod_segs:
         _SKIP = {"date", "symbol", "fiscalYear", "period", "reportedCurrency", "cik", "fillingDate"}
@@ -135,8 +179,10 @@ def _growth_sources(fundamentals: dict, raw: dict | None) -> list[dict]:
             if rows:
                 n_segs = len(new_data)
                 header_note = f"{period_label} comparison, {n_segs} segment{'s' if n_segs != 1 else ''}"
+                # Don't list removed segment names — they are often long and garble the UI label.
+                # Just note the count if any were dropped.
                 if gone:
-                    header_note += f"; removed: {', '.join(sorted(gone)[:2])}"
+                    header_note += f"; {len(gone)} segment{'s' if len(gone) != 1 else ''} removed from prior period"
                 sources.append({"label": "Segment breakdown", "value": f"{n_segs} segments", "note": header_note, "_seg_header": True})
                 for _, seg_name, val, note in rows:
                     sources.append({"label": seg_name, "value": val, "note": note, "_seg_row": True})
@@ -189,12 +235,43 @@ def _pillar_growth(fundamentals: dict, raw: dict | None = None) -> dict:
 
     rev10 = _safe(g.get("revenue_10y"))
 
+    # ── Inflection bonus (0-3 pts): recent quarter turns positive despite weak history ──
+    # Recognises companies in early-cycle recovery that the CAGR-based scoring misses.
+    inflection_note = ""
+    inflection_pts  = 0.0
+    if raw and (rev5 is None or rev5 < 0.05):   # only meaningful for slow/declining growers
+        inc_q = raw.get("income_quarter") or []
+        if len(inc_q) >= 5:
+            def _sq(v):
+                try:
+                    x = float(v) if v is not None else None
+                    return None if (x is None or x != x) else x
+                except (TypeError, ValueError):
+                    return None
+            # YoY for most recent quarter (index 0 vs index 4 = same Q one year ago)
+            q_cur   = _sq(inc_q[0].get("revenue"))
+            q_prior = _sq(inc_q[4].get("revenue"))
+            if q_cur and q_prior and q_prior > 0:
+                recent_yoy = q_cur / q_prior - 1
+                if recent_yoy >= 0.05:    # strong quarterly inflection
+                    inflection_pts = 3.0
+                    inflection_note = f"strong inflection: most recent quarter +{recent_yoy*100:.1f}% YoY despite negative/flat history"
+                elif recent_yoy >= 0.01:  # mild inflection
+                    inflection_pts = 1.5
+                    inflection_note = f"early inflection: most recent quarter +{recent_yoy*100:.1f}% YoY"
+                elif recent_yoy < -0.05:  # accelerating decline — small penalty
+                    inflection_pts = -1.0
+                    inflection_note = f"continued decline: most recent quarter {recent_yoy*100:.1f}% YoY"
+    score = max(0.0, min(20.0, score + inflection_pts))
+
     points = [
         {"label": "Revenue CAGR", "value": f"3Y {_pct_fmt(rev3)} / 5Y {_pct_fmt(rev5)} / 10Y {_pct_fmt(rev10)}", "note": "compound annual growth rates"},
         {"label": "EPS CAGR 5Y",  "value": _pct_fmt(eps5),  "note": "earnings per share growth"},
         {"label": "FCF CAGR 5Y",  "value": _pct_fmt(fcf5),  "note": "free cash flow growth"},
         {"label": "Growth trend",  "value": trend_note,      "note": "3Y vs 5Y revenue acceleration"},
     ]
+    if inflection_note:
+        points.append({"label": "Quarterly inflection", "value": f"{inflection_pts:+.1f}pts", "note": inflection_note})
     points += _growth_sources(fundamentals, raw)
 
     verdict = _verdict_from_pct(score / 20, [
@@ -441,4 +518,196 @@ def build_fundamental_analysis(
         "max_score":   round(max_total, 1),
         "verdict":     verdict,
         "pillars":     pillars,
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Transition Score — forward-looking complement to the trailing pillar scoring.
+# Does NOT modify any pillar math. Surfaces "is this a turnaround / early-cycle
+# growth story" alongside the trailing Business Quality verdict so the analyst
+# (and the AI narrative) can distinguish "ROIC < WACC because in transition"
+# from "ROIC < WACC because structurally declining."
+# ────────────────────────────────────────────────────────────────────────────
+
+def build_transition_score(fundamentals: dict, raw: dict | None,
+                            ceo: dict | None = None) -> dict:
+    """Compute a 0-60 transition score from 3 forward-looking signals:
+      1. ROIC trend (slope of last 4 fiscal years)
+      2. Quarterly revenue inflection (most recent Q YoY)
+      3. Gross margin expansion (most recent quarter YoY)
+
+    Each signal worth 0-20 pts (max 60 total). Two further signals
+    (forward guidance, AI/growth segment exposure) are reserved for the
+    deep-research mode that will add AI-synthesised data — placeholder rows
+    are returned with pts=None so the UI can show "pending deep research."
+
+    Returns:
+        {
+          "score":      float,                    # 0-60
+          "max_score":  60,
+          "score_pct":  float,                    # 0-100, for badge colour
+          "verdict":    str,                      # see thresholds below
+          "signals":    [{"name", "value", "pts", "max"}, ...],
+          "deferred":   [{"name", "value", "pts", "max"}, ...],
+        }
+    """
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    signals: list[dict] = []
+    score   = 0.0
+
+    # ─── 1. ROIC trend ─────────────────────────────────────────────────────
+    # Slope of the last 4 fiscal years' ROIC. Use key_metrics_annual.roic when
+    # available; otherwise approximate from raw income/balance.
+    roic_pts  = 0.0
+    roic_note = "—"
+    roic_value = "—"
+    roic_series: list[tuple[str, float]] = []
+    if raw:
+        km_a = raw.get("key_metrics_annual") or []
+        for km in km_a[:5]:
+            y = str(km.get("calendarYear") or (km.get("date") or "")[:4] or "")
+            r = _s(km.get("returnOnInvestedCapital") or km.get("roic"))
+            if y and r is not None:
+                roic_series.append((y, r))
+        # Need at least 3 years to compute a meaningful trend
+        if len(roic_series) >= 3:
+            # Sort newest-first → reverse to oldest-first for slope calc
+            ordered = sorted(roic_series, key=lambda t: t[0])
+            n = len(ordered)
+            xs = list(range(n))
+            ys = [v for _, v in ordered]
+            mean_x = sum(xs) / n
+            mean_y = sum(ys) / n
+            denom = sum((x - mean_x) ** 2 for x in xs)
+            slope = (sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denom
+                     if denom else 0.0)
+            # slope is in ROIC fraction per year (e.g. 0.03 = +3pp/yr)
+            pp_per_yr = slope * 100
+            roic_value = f"{pp_per_yr:+.1f}pp/yr"
+            current_roic = ordered[-1][1] * 100
+            if pp_per_yr >= 3.0:
+                roic_pts  = 20.0
+                roic_note = f"strong ROIC expansion ({pp_per_yr:+.1f}pp/yr); current {current_roic:.1f}%"
+            elif pp_per_yr >= 1.5:
+                roic_pts  = 15.0
+                roic_note = f"meaningful ROIC expansion ({pp_per_yr:+.1f}pp/yr); current {current_roic:.1f}%"
+            elif pp_per_yr >= 0.5:
+                roic_pts  = 10.0
+                roic_note = f"modest ROIC expansion ({pp_per_yr:+.1f}pp/yr); current {current_roic:.1f}%"
+            elif pp_per_yr >= -0.5:
+                roic_pts  = 5.0
+                roic_note = f"flat ROIC ({pp_per_yr:+.1f}pp/yr); current {current_roic:.1f}%"
+            else:
+                roic_pts  = 0.0
+                roic_note = f"declining ROIC ({pp_per_yr:+.1f}pp/yr); current {current_roic:.1f}%"
+    score += roic_pts
+    signals.append({
+        "name": "ROIC trend (4Y slope)", "value": roic_value,
+        "pts":  round(roic_pts, 1), "max": 20.0, "note": roic_note,
+    })
+
+    # ─── 2. Quarterly revenue inflection ───────────────────────────────────
+    inf_pts   = 0.0
+    inf_value = "—"
+    inf_note  = "insufficient quarterly data"
+    if raw:
+        inc_q = raw.get("income_quarter") or []
+        if len(inc_q) >= 5:
+            q_cur   = _s(inc_q[0].get("revenue"))
+            q_prior = _s(inc_q[4].get("revenue"))
+            if q_cur and q_prior and q_prior > 0:
+                recent_yoy = (q_cur / q_prior - 1) * 100   # pp
+                inf_value  = f"{recent_yoy:+.1f}% YoY"
+                if recent_yoy >= 8.0:
+                    inf_pts  = 20.0
+                    inf_note = "strong quarterly inflection"
+                elif recent_yoy >= 3.0:
+                    inf_pts  = 15.0
+                    inf_note = "clear quarterly inflection"
+                elif recent_yoy >= 0.0:
+                    inf_pts  = 10.0
+                    inf_note = "early quarterly inflection (positive)"
+                elif recent_yoy >= -3.0:
+                    inf_pts  = 5.0
+                    inf_note = "near-flat (small decline)"
+                else:
+                    inf_pts  = 0.0
+                    inf_note = "continued quarterly decline"
+    score += inf_pts
+    signals.append({
+        "name": "Quarterly revenue inflection", "value": inf_value,
+        "pts":  round(inf_pts, 1), "max": 20.0, "note": inf_note,
+    })
+
+    # ─── 3. Gross margin expansion (most recent quarter YoY) ───────────────
+    gm_pts   = 0.0
+    gm_value = "—"
+    gm_note  = "insufficient quarterly data"
+    if raw:
+        inc_q = raw.get("income_quarter") or []
+        if len(inc_q) >= 5:
+            cur_gp  = _s(inc_q[0].get("grossProfit"))
+            cur_rev = _s(inc_q[0].get("revenue"))
+            pri_gp  = _s(inc_q[4].get("grossProfit"))
+            pri_rev = _s(inc_q[4].get("revenue"))
+            if (cur_gp is not None and cur_rev and cur_rev > 0
+                    and pri_gp is not None and pri_rev and pri_rev > 0):
+                cur_gm = cur_gp / cur_rev
+                pri_gm = pri_gp / pri_rev
+                delta_bps = (cur_gm - pri_gm) * 10_000     # basis points
+                gm_value  = f"{delta_bps:+.0f} bps"
+                if delta_bps >= 200:
+                    gm_pts  = 20.0
+                    gm_note = f"strong margin expansion (current GM {cur_gm*100:.1f}%)"
+                elif delta_bps >= 100:
+                    gm_pts  = 15.0
+                    gm_note = f"meaningful margin expansion (current GM {cur_gm*100:.1f}%)"
+                elif delta_bps >= 30:
+                    gm_pts  = 10.0
+                    gm_note = f"modest margin expansion (current GM {cur_gm*100:.1f}%)"
+                elif delta_bps >= -50:
+                    gm_pts  = 5.0
+                    gm_note = f"stable margin (current GM {cur_gm*100:.1f}%)"
+                else:
+                    gm_pts  = 0.0
+                    gm_note = f"margin compression (current GM {cur_gm*100:.1f}%)"
+    score += gm_pts
+    signals.append({
+        "name": "Gross margin Δ (quarterly YoY)", "value": gm_value,
+        "pts":  round(gm_pts, 1), "max": 20.0, "note": gm_note,
+    })
+
+    # ─── Reserved signals (filled in next session by AI synthesis) ─────────
+    deferred = [
+        {"name": "Forward guidance vs prior actual",
+         "value": "—", "pts": None, "max": 20.0,
+         "note":  "Available in deep-research mode (press-release guidance synthesis)"},
+        {"name": "AI / growth-segment exposure",
+         "value": "—", "pts": None, "max": 20.0,
+         "note":  "Available in deep-research mode (segment-callout synthesis)"},
+    ]
+
+    max_score = 60.0   # 3 active signals × 20 pts each
+    pct = (score / max_score) * 100 if max_score else 0
+
+    # Verdict thresholds scaled to 60-pt max
+    if   score >= 45:  verdict = "Strong transition / re-acceleration"
+    elif score >= 30:  verdict = "Early transition signals"
+    elif score >= 15:  verdict = "Mixed signals"
+    else:              verdict = "No transition (stable or declining)"
+
+    return {
+        "score":      round(score, 1),
+        "max_score":  max_score,
+        "score_pct":  round(pct, 1),
+        "verdict":    verdict,
+        "signals":    signals,
+        "deferred":   deferred,
     }

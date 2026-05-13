@@ -28,7 +28,7 @@ from pipeline.red_flags import detect_red_flags
 from pipeline.ai_synthesis import synthesize, synthesize_step4, chat_followup
 from pipeline.ceo_analysis import build_ceo_analysis
 from pipeline.competition import build_competition
-from pipeline.fundamental_analysis import build_fundamental_analysis
+from pipeline.fundamental_analysis import build_fundamental_analysis, build_transition_score
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -61,6 +61,11 @@ def _safe_markdown(text: str) -> str:
                 out_lines.append("</ul>")
                 in_list = False
             out_lines.append("")
+            continue
+        if line.startswith("### "):
+            if in_list:
+                out_lines.append("</ul>"); in_list = False
+            out_lines.append(f"<h4>{_html.escape(line[4:])}</h4>")
             continue
         if line.startswith("## "):
             if in_list:
@@ -134,7 +139,7 @@ def _cache_put(ticker: str, payload: dict) -> None:
     p.write_text(json.dumps(payload, default=str))
 
 
-async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
+async def run_pipeline(ticker: str, moat_hypothesis: str = "", deep_research: bool = False) -> dict:
     """Run full Dorsey pipeline. Returns the report dict."""
     t0 = time.time()
     raw = await fetch_all(ticker)
@@ -151,20 +156,36 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
     valuation = build_valuation(raw, fundamentals)
     red_flags = detect_red_flags(raw, fundamentals)
     fundamental_analysis = build_fundamental_analysis(fundamentals, red_flags, ceo, competition, raw=raw)
+    # Forward-looking transition score (complements, does not modify, the pillar scoring above).
+    # Surfaces ROIC trend + quarterly inflection + margin expansion so transition / re-acceleration
+    # stories (e.g. Nokia 2025-26 AI optical cycle) are visible alongside trailing pillar scores.
+    transition_score = build_transition_score(fundamentals, raw, ceo)
     ai_step4 = synthesize_step4(fundamental_analysis, fundamentals["snapshot"],
                                 raw=raw, competition=competition, red_flags=red_flags,
-                                fundamentals=fundamentals, ceo=ceo)
+                                fundamentals=fundamentals, ceo=ceo,
+                                transition_score=transition_score,
+                                deep_research=deep_research)
+    # Pass synth results back to synthesize() so executive read also benefits
+    pr_synth      = ai_step4.get("_pr_synth")
+    transcript_synth = ai_step4.get("_transcript_synth")
+    filing_synth  = ai_step4.get("_filing_synth")
     ai = synthesize(fundamentals["snapshot"], moat, valuation, red_flags,
                     moat_hypothesis=moat_hypothesis.strip(), raw=raw,
                     competition=competition,
-                    fundamental_analysis=fundamental_analysis)
+                    fundamental_analysis=fundamental_analysis,
+                    transition_score=transition_score,
+                    transcript_synth=transcript_synth,
+                    filing_synth=filing_synth,
+                    pr_synth=pr_synth)
 
     elapsed = round(time.time() - t0, 2)
-    log.info("pipeline %s done in %.2fs (ai=%s, cost=$%.5f)",
-             ticker, elapsed, ai["used_ai"], ai["cost_usd"])
+    log.info("pipeline %s done in %.2fs (ai=%s, cost=$%.5f, deep=%s)",
+             ticker, elapsed, ai["used_ai"], ai["cost_usd"], deep_research)
     return {
         "ticker": ticker.upper(),
         "moat_hypothesis": moat_hypothesis.strip(),
+        "deep_research": deep_research,
+        "deep_research_mode": ai_step4.get("_deep_research_mode"),
         "fundamentals": fundamentals,
         "moat": moat,
         "story_moat": story_moat,
@@ -174,6 +195,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "") -> dict:
         "valuation": valuation,
         "red_flags": red_flags,
         "fundamental_analysis": fundamental_analysis,
+        "transition_score": transition_score,
         "ai_step4": ai_step4,
         "ai": ai,
         # Store news/press-releases for in-page chat context (not full raw to keep cache small)
@@ -198,6 +220,7 @@ async def analyze(
     password: str = Form(...),
     moat_hypothesis: str = Form(default=""),
     force_refresh: str = Form(default=""),
+    deep_research: str = Form(default=""),
 ):
     if not _check_password(password):
         raise HTTPException(401, "Invalid password.")
@@ -206,11 +229,15 @@ async def analyze(
     if not t or not all(c.isalnum() or c in "-." for c in t) or len(t) > 10:
         raise HTTPException(400, "Invalid ticker.")
 
-    # Cache key includes a hash of the hypothesis so a fresh hypothesis bypasses cache
+    do_deep = bool(deep_research)
+
+    # Cache key includes a hash of the hypothesis AND deep_research flag
+    # so toggling deep research forces a fresh analysis
     hyp = moat_hypothesis.strip()
     import hashlib
     hyp_hash = hashlib.md5(hyp.encode()).hexdigest()[:8] if hyp else "nohyp"
-    cache_key = f"{t}_{hyp_hash}"
+    dr_suffix = "_dr" if do_deep else ""
+    cache_key = f"{t}_{hyp_hash}{dr_suffix}"
 
     do_refresh = bool(force_refresh)
     cached = None if do_refresh else _cache_get(cache_key)
@@ -221,7 +248,7 @@ async def analyze(
         if do_refresh:
             # Delete existing cache entry so stale data is gone
             _cache_path(cache_key).unlink(missing_ok=True)
-        report = await run_pipeline(t, moat_hypothesis=hyp)
+        report = await run_pipeline(t, moat_hypothesis=hyp, deep_research=do_deep)
         report["_from_cache"] = False
         _cache_put(cache_key, report)
 

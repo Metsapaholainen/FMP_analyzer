@@ -125,27 +125,36 @@ async def fmp_get(
     return data
 
 
-async def fetch_10k_risk_text(client: httpx.AsyncClient, sec_filings: list) -> str | None:
-    """Stream the most recent 10-K from SEC EDGAR and extract the Risk Factors section.
+async def fetch_filing_sections(client: httpx.AsyncClient, sec_filings: list) -> dict:
+    """Stream the most recent 10-K or 20-F from SEC EDGAR and extract:
+      - risk_factors    (10-K Item 1A / 20-F Item 3.D)
+      - business_desc   (10-K Item 1   / 20-F Item 4)
+      - mdna            (10-K Item 7   / 20-F Item 5)
 
     Uses the finalLink from FMP's sec_filings metadata to find the actual document.
-    Streams up to 2 MB then stops — enough to capture Item 1A for most filers.
-    Returns the raw text (HTML-stripped) of the Risk Factors section, or None.
+    Streams up to 2 MB then stops — enough to capture all three sections for
+    most filers. Each section is capped at 7,000 chars to bound AI token cost.
+    Returns dict with three str-or-None keys. None on fetch/parse failure.
     """
     import re
     from html.parser import HTMLParser
 
-    annual = [f for f in sec_filings
-              if (f.get("formType") or f.get("type") or "").upper().startswith("10-K")]
+    empty = {"risk_factors": None, "business_desc": None, "mdna": None}
+
+    # Accept 10-K (US domestic), 20-F (foreign filers like Nokia), 10-K/A (amendments)
+    annual = [
+        f for f in sec_filings
+        if (f.get("formType") or f.get("type") or "").upper().startswith(("10-K", "20-F"))
+    ]
     if not annual:
-        return None
+        return empty
 
     link = annual[0].get("finalLink") or annual[0].get("link") or ""
+    form = (annual[0].get("formType") or annual[0].get("type") or "").upper()
     if not link or "sec.gov" not in link:
-        return None
+        return empty
 
     headers = {
-        # SEC requires a descriptive User-Agent: https://www.sec.gov/os/accessing-edgar-data
         "User-Agent": "FMP-Analyzer research tool (noreply@fmp-analyzer.local)",
         "Accept": "text/html,application/xhtml+xml",
     }
@@ -156,12 +165,12 @@ async def fetch_10k_risk_text(client: httpx.AsyncClient, sec_filings: list) -> s
         async with client.stream("GET", link, timeout=25.0, headers=headers,
                                   follow_redirects=True) as r:
             if r.status_code != 200:
-                log.warning("EDGAR 10-K fetch HTTP %s for %s", r.status_code, link)
-                return None
+                log.warning("EDGAR filing fetch HTTP %s for %s", r.status_code, link)
+                return empty
             content_type = r.headers.get("content-type", "")
             if "html" not in content_type and "text" not in content_type:
-                log.warning("EDGAR 10-K unexpected content-type: %s", content_type)
-                return None
+                log.warning("EDGAR filing unexpected content-type: %s", content_type)
+                return empty
             async for chunk in r.aiter_text(chunk_size=32_768):
                 chunks.append(chunk)
                 total += len(chunk)
@@ -169,8 +178,8 @@ async def fetch_10k_risk_text(client: httpx.AsyncClient, sec_filings: list) -> s
                     break
         html = "".join(chunks)
     except Exception as e:
-        log.warning("EDGAR 10-K stream failed for %s: %s", link, e)
-        return None
+        log.warning("EDGAR filing stream failed for %s: %s", link, e)
+        return empty
 
     # Strip HTML tags, skipping script/style content
     class _Stripper(HTMLParser):
@@ -199,24 +208,84 @@ async def fetch_10k_risk_text(client: httpx.AsyncClient, sec_filings: list) -> s
     text = " ".join(stripper.parts)
     text = re.sub(r'\s+', ' ', text).strip()
 
-    # Find "Item 1A" risk factors section
-    m = re.search(
-        r'Item\s+1A[\.\-–—]?\s*(?:\.?\s*)?Risk\s+Factors',
-        text, re.IGNORECASE
-    )
-    if not m:
-        log.info("EDGAR 10-K: Item 1A not found in first 2MB of %s", link)
-        return None
+    # Section extractor: given a start anchor regex and a list of end-anchor regexes,
+    # returns the text between the first match of start and the first match of any end.
+    def _extract(start_re: str, end_res: list[str], max_chars: int = 7_000) -> str | None:
+        m = re.search(start_re, text, re.IGNORECASE)
+        if not m:
+            return None
+        start = m.start()
+        # Skip 300 chars past the section header to avoid matching the same anchor
+        # again in a table-of-contents-style preamble.
+        tail = text[start + 300:]
+        end_positions = []
+        for er in end_res:
+            em = re.search(er, tail, re.IGNORECASE)
+            if em:
+                end_positions.append(em.start())
+        end = start + 300 + (min(end_positions) if end_positions
+                              else min(len(tail), max_chars + 1000))
+        section = text[start:end].strip()
+        if len(section) < 200:   # too short to be the real section, likely a TOC entry
+            return None
+        return section[:max_chars]
 
-    start = m.start()
-    # End: Item 1B (Unresolved Staff Comments) or Item 2 (Properties)
-    tail = text[start + 300:]
-    end_m = re.search(r'Item\s+1B|Item\s+2[\.\s\-–—]', tail, re.IGNORECASE)
-    end = start + 300 + (end_m.start() if end_m else min(len(tail), 8_000))
+    is_20f = form.startswith("20-F")
 
-    risk_text = text[start:end].strip()
-    log.info("EDGAR 10-K: extracted %d chars of risk factors from %s", len(risk_text), link)
-    return risk_text[:7_000]
+    if is_20f:
+        # 20-F structure (foreign private issuers like Nokia, Ericsson):
+        #  Item 3.D = Risk factors, Item 4 = Information on the company,
+        #  Item 5  = Operating & financial review and prospects (MD&A equivalent)
+        risk = _extract(
+            r'Item\s+3[\.\-]?\s*D[\.\-]?\s*(?:Risk\s+Factors|RISK\s+FACTORS)',
+            [r'Item\s+4[\.\s\-]', r'Item\s+3[\.\-]?\s*E']
+        ) or _extract(
+            # Fallback: some 20-Fs label the risk section just "Risk Factors"
+            r'\bRisk\s+Factors\b',
+            [r'Item\s+4[\.\s\-]', r'Information\s+on\s+the\s+Company']
+        )
+        business = _extract(
+            r'Item\s+4[\.\-]?\s*(?:A[\.\-]?\s*)?(?:Information\s+on\s+the\s+Company|History\s+and\s+Development)',
+            [r'Item\s+4A[\.\s\-]', r'Item\s+5[\.\s\-]', r'Unresolved\s+Staff\s+Comments']
+        )
+        mdna = _extract(
+            r'Item\s+5[\.\-]?\s*(?:A[\.\-]?\s*)?(?:Operating\s+(?:and|&)\s+Financial\s+Review|OPERATING\s+(?:AND|&)\s+FINANCIAL\s+REVIEW)',
+            [r'Item\s+6[\.\s\-]', r'Directors,?\s+Senior\s+Management']
+        )
+    else:
+        # 10-K structure (US domestic)
+        risk = _extract(
+            r'Item\s+1A[\.\-–—]?\s*(?:\.?\s*)?Risk\s+Factors',
+            [r'Item\s+1B[\.\s\-]', r'Item\s+2[\.\s\-]']
+        )
+        business = _extract(
+            # Item 1. Business — the strategic priorities section.
+            # Avoid matching "Item 1A" (Risk Factors) — require a NON-letter after the "1".
+            r'Item\s+1[\.\s\-–—](?!A)\s*(?:Business|BUSINESS)',
+            [r'Item\s+1A[\.\s\-]', r'Item\s+2[\.\s\-]']
+        )
+        mdna = _extract(
+            r"Item\s+7[\.\-–—]?\s*(?:Management's?\s+Discussion|MANAGEMENT'?S?\s+DISCUSSION)",
+            [r'Item\s+7A[\.\s\-]', r'Item\s+8[\.\s\-]', r'Quantitative\s+and\s+Qualitative\s+Disclosures']
+        )
+
+    log.info("EDGAR %s: risk=%d chars, business=%d chars, mdna=%d chars from %s",
+             form,
+             len(risk) if risk else 0,
+             len(business) if business else 0,
+             len(mdna) if mdna else 0,
+             link)
+
+    return {"risk_factors": risk, "business_desc": business, "mdna": mdna}
+
+
+async def fetch_10k_risk_text(client: httpx.AsyncClient, sec_filings: list) -> str | None:
+    """Back-compat alias: returns only the risk_factors string.
+    New code should call fetch_filing_sections() directly to also receive
+    business_desc and mdna.
+    """
+    sections = await fetch_filing_sections(client, sec_filings)
+    return sections.get("risk_factors")
 
 
 async def fetch_all(ticker: str) -> dict:
@@ -236,10 +305,10 @@ async def fetch_all(ticker: str) -> dict:
             "ratios_annual":      fmp_get(client, "ratios", {"symbol": t, "period": "annual", "limit": 10}),
             "key_metrics_annual": fmp_get(client, "key-metrics", {"symbol": t, "period": "annual", "limit": 10}),
             "income_annual":      fmp_get(client, "income-statement", {"symbol": t, "period": "annual", "limit": 10}),
-            "income_quarter":     fmp_get(client, "income-statement", {"symbol": t, "period": "quarter", "limit": 5}),
+            "income_quarter":     fmp_get(client, "income-statement", {"symbol": t, "period": "quarter", "limit": 9}),
             "balance_annual":     fmp_get(client, "balance-sheet-statement", {"symbol": t, "period": "annual", "limit": 10}),
             "cashflow_annual":    fmp_get(client, "cash-flow-statement", {"symbol": t, "period": "annual", "limit": 10}),
-            "cashflow_quarter":   fmp_get(client, "cash-flow-statement", {"symbol": t, "period": "quarter", "limit": 5}),
+            "cashflow_quarter":   fmp_get(client, "cash-flow-statement", {"symbol": t, "period": "quarter", "limit": 9}),
             "cashflow_ttm":       fmp_get(client, "cash-flow-statement-ttm", {"symbol": t}),
             "income_ttm":         fmp_get(client, "income-statement-ttm", {"symbol": t}),
             "dcf":                fmp_get(client, "discounted-cash-flow", {"symbol": t}),
@@ -249,14 +318,26 @@ async def fetch_all(ticker: str) -> dict:
             "press_releases":     fmp_get(client, "press-releases", {"symbol": t, "limit": 20}),
             "price_targets":      fmp_get(client, "price-target-consensus", {"symbol": t}),
             "analyst_grades":     fmp_get(client, "grades-summary", {"symbol": t}),
-            "segments_product":   fmp_get(client, "revenue-product-segmentation", {"symbol": t, "structure": "flat"}),
-            "segments_geo":       fmp_get(client, "revenue-geographic-segmentation", {"symbol": t, "structure": "flat"}),
+            "segments_product":         fmp_get(client, "revenue-product-segmentation",
+                                               {"symbol": t, "structure": "flat"}),
+            "segments_product_quarter": fmp_get(client, "revenue-product-segmentation",
+                                               {"symbol": t, "period": "quarter", "structure": "flat", "limit": 9}),
+            "segments_geo":             fmp_get(client, "revenue-geographic-segmentation",
+                                               {"symbol": t, "structure": "flat"}),
             # limit=100 because heavy filers (AAPL etc) file dozens of Form 4s — need headroom to find 10-K/20-F
             "sec_filings":        fmp_get(client, "sec-filings-search/symbol",
                                           {"symbol": t, "from": sec_from, "to": sec_to, "limit": 100}),
             "insider_trades":     fmp_get(client, "insider-trading/search", {"symbol": t, "limit": 50}),
             "peers":              fmp_get(client, "stock-peers", {"symbol": t}),
             "sector_pe":          fmp_get(client, "sector-pe-snapshot", {"date": sec_to}),
+            "analyst_estimates":  fmp_get(client, f"analyst-estimates/{t}",
+                                          {"period": "annual", "limit": 4},
+                                          base=FMP_BASE_V3),
+            # Earnings call transcript — most recent quarter. Returns list of dicts
+            # with {symbol, quarter, year, date, content}. Used by AI synthesis to
+            # extract CEO priorities, forward guidance, segment colour, Q&A concerns.
+            "earnings_transcript_latest": fmp_get(client, "earning-call-transcript",
+                                                  {"symbol": t, "limit": 1}),
             # institutional ownership endpoints require paid FMP tier — skipped
         }
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -306,23 +387,23 @@ async def fetch_all(ticker: str) -> dict:
                 )
                 return pt, {"key_metrics_ttm": km, "ratios_ttm": rt, "profile": pf}
 
-            # Fetch peer metrics and 10-K risk factors text in parallel
+            # Fetch peer metrics and filing sections (risk + business + MD&A) in parallel
             sec_data = listify(out.get("sec_filings"))
             gather_inputs: list = [_fetch_peer(pt) for pt in peer_tickers]
             if sec_data:
-                gather_inputs.append(fetch_10k_risk_text(client, sec_data))
+                gather_inputs.append(fetch_filing_sections(client, sec_data))
 
             all_results = await asyncio.gather(*gather_inputs, return_exceptions=True)
 
-            risk_result = all_results[-1] if sec_data else None
+            filing_result = all_results[-1] if sec_data else None
             peer_results = all_results[:-1] if sec_data else all_results
         else:
-            # No peers — still fetch 10-K risk text
+            # No peers — still fetch filing sections
             sec_data = listify(out.get("sec_filings"))
             if sec_data:
-                risk_result = await fetch_10k_risk_text(client, sec_data)
+                filing_result = await fetch_filing_sections(client, sec_data)
             else:
-                risk_result = None
+                filing_result = None
             peer_results = []
 
         for r in peer_results:
@@ -333,12 +414,16 @@ async def fetch_all(ticker: str) -> dict:
             peer_metrics[pt] = blob
         out["peer_metrics"] = peer_metrics
 
-        # Store raw 10-K risk factors text (None if unavailable or fetch failed)
-        if isinstance(risk_result, Exception):
-            log.warning("EDGAR 10-K risk fetch failed: %s", risk_result)
-            out["_10k_risk_text"] = None
+        # Store extracted filing sections (risk_factors, business_desc, mdna).
+        # Each key may be None if section absent or fetch failed.
+        if isinstance(filing_result, Exception) or filing_result is None:
+            if isinstance(filing_result, Exception):
+                log.warning("EDGAR filing fetch failed: %s", filing_result)
+            out["_filing_sections"] = {"risk_factors": None, "business_desc": None, "mdna": None}
         else:
-            out["_10k_risk_text"] = risk_result
+            out["_filing_sections"] = filing_result
+        # Backward-compat: keep _10k_risk_text alias for existing consumers
+        out["_10k_risk_text"] = out["_filing_sections"].get("risk_factors")
 
     return out
 

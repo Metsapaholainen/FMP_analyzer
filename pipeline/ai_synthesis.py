@@ -93,7 +93,11 @@ def _fmt_pillar(p: dict) -> str:
 def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
                   moat_hypothesis: str, raw: dict | None = None,
                   competition: dict | None = None,
-                  fundamental_analysis: dict | None = None) -> str:
+                  fundamental_analysis: dict | None = None,
+                  transition_score: dict | None = None,
+                  transcript_synth: dict | None = None,
+                  filing_synth: dict | None = None,
+                  pr_synth: dict | None = None) -> str:
     # ── News & press releases block ────────────────────────────────────────
     news_raw = listify(raw.get("stock_news")) if raw else []
     press_raw = listify(raw.get("press_releases")) if raw else []
@@ -121,7 +125,72 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         if title:
             pr_lines.append(f"  - [{date}] {title}{_news_snippet(p)}")
 
+    # Cycle context: for sectors where industry-cycle position matters,
+    # inject a brief context note so AI can calibrate its assessment
+    _CYCLE_SECTORS = {
+        "Communication Equipment": (
+            "Telecom infrastructure runs ~5–8 year capex cycles. Current cycle (2024–2027): "
+            "5G RAN refresh + AI datacenter optical buildout. "
+            "IMPORTANT FRAMING: Coherent optics, DCI, pluggables and DSPs are AI-infrastructure "
+            "products valued like semiconductor peers (CIEN, COHR, LITE, Marvell), not legacy "
+            "telecom hardware. Do NOT treat optical-segment growth as 'lower-margin telecom.' "
+            "Western-vendor tailwind from Huawei restrictions is real but cycle-dependent. "
+            "IMPORTANT — competitive reality check: Open RAN / ORAN hype has cooled since 2023. "
+            "Major operators (Deutsche Telekom, Vodafone, AT&T) have slowed ORAN rollouts citing "
+            "performance and integration cost. AI-RAN may actually favor integrated vendors "
+            "(Ericsson, Nokia, Samsung) over disaggregated players (Mavenir, Rakuten Symphony). "
+            "Do not over-index on Mavenir/ORAN displacement risk in the bear case. "
+            "Switching costs in this sector are structurally very high (multi-year carrier "
+            "contracts, regulatory certifications, service organization depth, geopolitical "
+            "trust as a Western vendor) — these do NOT show up in trailing ROIC during a "
+            "capex cycle but ARE moats."
+        ),
+        "Semiconductors": (
+            "Semis run 3–4 year inventory cycles. Current driver: AI accelerator demand "
+            "(2023–2026 upcycle) on top of secular datacenter growth. "
+            "AI-exposed names (NVDA, AVGO, AMD, MRVL) are re-rated to growth-stock multiples; "
+            "non-AI semis (auto, industrial, memory) remain cyclical. Distinguish carefully."
+        ),
+        "Energy": (
+            "Oil & gas runs 5–10 year capex cycles driven by commodity price. "
+            "Current: post-2022 reinvestment phase."
+        ),
+        "Utilities": (
+            "Regulated return environment; primary driver is rate case timing "
+            "and grid modernization capex (now also AI-datacenter power demand)."
+        ),
+        "Electronic Components": (
+            "Components cycle tracks semis with a 1–2 quarter lag. AI/datacenter "
+            "optical and interconnect spend is the dominant 2024–2027 demand driver. "
+            "Optical components specifically are AI-infrastructure inputs, not commodity "
+            "telecom — value them accordingly."
+        ),
+        "Software - Application": (
+            "Enterprise SaaS runs 3–5 year refresh cycles tied to IT budget cycles. "
+            "Current driver: AI/workflow automation wave (2024–2027). "
+            "Key metric: Rule of 40 (revenue growth % + FCF margin %). Net revenue retention "
+            ">110% and gross retention >90% signal moat; <100% NRR signals churn problem."
+        ),
+        "Software - Infrastructure": (
+            "Cloud/data infra software is usage-based: revenue tracks customer compute / data "
+            "growth, not seat count. Hyperscaler tailwinds (AI workload migration) drive 2024–2027 "
+            "growth. Watch consumption vs commit gap."
+        ),
+        "Information Technology Services": (
+            "IT services have multi-year backlog visibility but margins compress in pricing wars. "
+            "Current driver: enterprise AI integration consulting (high-margin) offsetting legacy "
+            "outsourcing erosion. Look at backlog growth and book-to-bill."
+        ),
+    }
+    industry_val = snapshot.get("industry") or ""
+    cycle_note = _CYCLE_SECTORS.get(industry_val, "")
+    cycle_block = (
+        f"INDUSTRY CYCLE CONTEXT:\n  {cycle_note}\n\n"
+    ) if cycle_note else ""
+
     news_block = corporate_actions_block  # lead with structured corporate actions
+    if cycle_block:
+        news_block = cycle_block + news_block
     if news_lines:
         news_block += (
             "RECENT NEWS (context and sentiment — verify numbers against filings):\n"
@@ -148,6 +217,20 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
             f"Ratings: {analyst['buy']} Buy / {analyst.get('hold') or '—'} Hold / "
             f"{analyst.get('sell') or '—'} Sell"
         )
+    # Forward revenue & EPS estimates — inject into analyst block
+    _fe_prompt = _build_forward_estimates(raw, None) if raw else None
+    if _fe_prompt and _fe_prompt.get("rows"):
+        fe_parts = []
+        for row in _fe_prompt["rows"][:3]:
+            gr = f"{row['rev_growth_pct']:+.1f}%" if row["rev_growth_pct"] is not None else "n/a"
+            ep = f", EPS ${row['eps_est']:.2f}" if row.get("eps_est") else ""
+            fe_parts.append(f"FY{row['year']}: rev ${row['rev_est_b']:.1f}B ({gr}){ep}")
+        analyst_lines.append("Forward estimates: " + " | ".join(fe_parts))
+        if _fe_prompt.get("reaccel_flag"):
+            analyst_lines.append(
+                f"⚡ Analysts project revenue re-acceleration: "
+                f"+{_fe_prompt['vs_historical_5y']:+.1f}pp above 5Y historical CAGR"
+            )
     analyst_block = (
         "ANALYST CONSENSUS:\n" + "\n".join(f"  {l}" for l in analyst_lines) + "\n\n"
     ) if analyst_lines else ""
@@ -196,7 +279,23 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
         "SMART-MONEY SIGNALS:\n" + "\n".join(f"  {l}" for l in sm_lines) + "\n\n"
     ) if sm_lines else ""
 
+    # Explicitly anchor key financials so the model cannot hallucinate revenue,
+    # market cap, or other headline numbers from training data.
+    verified_financials = {
+        k: v for k, v in {
+            "revenue_ttm":     snapshot.get("revenue_ttm"),
+            "net_income_ttm":  snapshot.get("net_income_ttm"),
+            "fcf_ttm":         snapshot.get("fcf_ttm"),
+            "market_cap":      snapshot.get("market_cap"),
+            "enterprise_value": snapshot.get("enterprise_value"),
+            "total_debt":      snapshot.get("total_debt"),
+            "cash":            snapshot.get("cash_and_equivalents"),
+            "price":           snapshot.get("price"),
+        }.items() if v is not None
+    }
+
     scorecard = {
+        "VERIFIED_FINANCIALS_USE_THESE_NOT_TRAINING_DATA": verified_financials,
         "ticker": snapshot.get("ticker"),
         "name": snapshot.get("name"),
         "sector": snapshot.get("sector"),
@@ -250,17 +349,120 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
             "as unsupported. If partially correct, say so precisely."
         )
 
+    # Forward-looking transition signal — surfaces re-acceleration evidence
+    # so the moat-assessment narrative doesn't default to "no moat" when the
+    # company is mid-cycle with trailing ROIC understating forward positioning.
+    transition_block = ""
+    if transition_score and transition_score.get("score") is not None:
+        ts = transition_score
+        transition_block = (
+            f"\n\nTRANSITION SCORE (forward-looking complement to trailing data): "
+            f"{ts['score']:.0f}/{int(ts['max_score'])} — {ts['verdict']}\n"
+        )
+        for sig in ts.get("signals", []):
+            if sig.get("pts") is not None:
+                transition_block += (
+                    f"  • {sig['name']}: {sig['value']} "
+                    f"({sig['pts']:.0f}/{int(sig['max'])}) — {sig['note']}\n"
+                )
+        if (ts.get("score") or 0) >= 30:
+            transition_block += (
+                "\nFRAMING DIRECTIVE: This company shows transition / re-acceleration "
+                "signals. When writing the moat assessment, distinguish between "
+                "TRAILING evidence (multi-year ROIC, current margins) and STRUCTURAL "
+                "evidence (multi-year contracts, certification barriers, regulatory "
+                "positioning, IP portfolio depth, switching costs that don't show in "
+                "trailing ROIC during a capex cycle). Use the format "
+                "'**<source>**: Structural: <Yes/No> / Trailing: <Yes/No> — <one-line "
+                "explanation>' for at least 2-3 of the moat sources. Do NOT default to "
+                "a single binary 'Not supported' verdict on the basis of trailing ROIC "
+                "alone when structural evidence exists in the data.\n"
+            )
+
+    # ── Deep-research synthesis context blocks ───────────────────────────────
+    synth_block = ""
+    if transcript_synth:
+        ts_lines = []
+        if transcript_synth.get("tone"):
+            ts_lines.append(f"Tone: {transcript_synth['tone']}")
+        if transcript_synth.get("ceo_priorities"):
+            ts_lines.append("CEO priorities: " + "; ".join(transcript_synth["ceo_priorities"][:4]))
+        if transcript_synth.get("growth_callouts"):
+            calls = [f"{c.get('segment','?')}: {c.get('claim','?')}" for c in transcript_synth["growth_callouts"][:5]]
+            ts_lines.append("Growth callouts: " + "; ".join(calls))
+        if transcript_synth.get("forward_guidance"):
+            gd = [f"{g.get('metric','?')} {g.get('range','?')} ({g.get('period','')})"
+                  for g in transcript_synth["forward_guidance"][:3]]
+            ts_lines.append("Guidance from call: " + "; ".join(gd))
+        if transcript_synth.get("qa_concerns"):
+            ts_lines.append("Analyst concerns: " + "; ".join(transcript_synth["qa_concerns"][:3]))
+        if transcript_synth.get("new_initiatives"):
+            ts_lines.append("New initiatives: " + "; ".join(transcript_synth["new_initiatives"][:3]))
+        if ts_lines:
+            synth_block += (
+                "MANAGEMENT COMMENTARY (from latest earnings call transcript — treat as high-authority):\n"
+                + "\n".join(f"  {l}" for l in ts_lines) + "\n\n"
+            )
+
+    if filing_synth:
+        fs_lines = []
+        if filing_synth.get("strategic_priorities"):
+            fs_lines.append("Strategic priorities: " + "; ".join(filing_synth["strategic_priorities"][:4]))
+        if filing_synth.get("growth_drivers_cited"):
+            fs_lines.append("Growth drivers cited by mgmt: " + "; ".join(filing_synth["growth_drivers_cited"][:4]))
+        if filing_synth.get("headwinds_acknowledged"):
+            fs_lines.append("Headwinds acknowledged: " + "; ".join(filing_synth["headwinds_acknowledged"][:3]))
+        if filing_synth.get("patents_ip_revenue"):
+            fs_lines.append(f"IP/licensing: {filing_synth['patents_ip_revenue']}")
+        if filing_synth.get("moat_language_score") is not None:
+            fs_lines.append(f"Moat language score in filing: {filing_synth['moat_language_score']}/10")
+        if fs_lines:
+            synth_block += (
+                "ANNUAL FILING STRATEGY (extracted from 10-K/20-F business desc + MD&A):\n"
+                + "\n".join(f"  {l}" for l in fs_lines) + "\n\n"
+            )
+
+    if pr_synth:
+        pr_lines_synth = []
+        g = pr_synth.get("current_guidance")
+        if g and g.get("metric"):
+            lo, hi, unit_g = g.get("range_low"), g.get("range_high"), g.get("unit") or ""
+            range_str = f"{unit_g} {lo:.1f}–{hi:.1f}" if (lo and hi) else (f"{unit_g} {lo:.1f}" if lo else "")
+            pr_lines_synth.append(
+                f"Current guidance: {g['metric']} = {range_str.strip()} ({g.get('period','')})"
+                + (f" — {g['raised_or_held']}" if g.get("raised_or_held") else "")
+            )
+        if pr_synth.get("segment_callouts"):
+            segs = [f"{s.get('segment','?')}: {'+'+str(s['growth_pct'])+'%' if s.get('growth_pct') is not None else ''} ({s.get('quote','')})"
+                    for s in pr_synth["segment_callouts"][:5]]
+            pr_lines_synth.append("Segment callouts: " + "; ".join(segs))
+        if pr_synth.get("deal_announcements"):
+            deals = [f"{d.get('counterparty','?')} ({d.get('deal_type','?')})"
+                     for d in pr_synth["deal_announcements"][:3]]
+            pr_lines_synth.append("Recent deals: " + "; ".join(deals))
+        if pr_synth.get("share_repurchase_news"):
+            pr_lines_synth.append(f"Buyback news: {pr_synth['share_repurchase_news']}")
+        if pr_lines_synth:
+            synth_block += (
+                "PRESS RELEASE EXTRACTS (official management statements — cite these in bull/bear points):\n"
+                + "\n".join(f"  {l}" for l in pr_lines_synth) + "\n\n"
+            )
+
     return (
         "You are a strict, evidence-driven equity analyst in the tradition of Pat Dorsey. "
         "Your job is to give an honest, realistic assessment — not to validate bullish narratives. "
         "A 'moat' must show up in the financial data (sustained ROIC, FCF margins, gross margin "
         "stability). If the data doesn't support one, say so clearly. Avoid false positives. "
         "But also: if the data is early-stage or limited, note what additional evidence would "
-        "confirm or deny the moat rather than defaulting to 'no moat'.\n\n"
+        "confirm or deny the moat rather than defaulting to 'no moat'. For companies in cyclical "
+        "or transition phases, trailing ROIC can structurally understate competitive position — "
+        "distinguish structural vs trailing evidence when both are available.\n\n"
         f"{news_block}{analyst_block}{seg_block}{sec_block}{sm_block}"
+        f"{synth_block}"
         f"SCORECARD:\n```json\n{json.dumps(scorecard, indent=2, default=str)}\n```"
+        f"{transition_block}"
         f"{hypothesis_block}\n\n"
-        "OUTPUT FORMAT (markdown, total ~450 words max):\n\n"
+        "OUTPUT FORMAT (markdown, total ~600 words max):\n\n"
         "## Executive summary\n"
         "Three sentences: business in one line, moat & valuation read in one, the single biggest risk.\n\n"
         "## Moat assessment\n"
@@ -274,17 +476,86 @@ def _build_prompt(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
             "Be direct: what holds up, what doesn't, and what's unverifiable from this data.\n"
             if moat_hypothesis else ""
         ) +
-        "\n## What to watch\n"
+        "\n## Bull vs Bear Scorecard\n"
+        "YOU MUST output a <bb_json>...</bb_json> block here. "
+        "NO markdown tables. NO pipe characters. NO bullet lists. ONLY the JSON block.\n"
+        "3 bull points + 3 bear points. Each point: "
+        "claim (one sentence), evidence (specific source: date/metric/quote), "
+        "confidence (High/Medium/Low), prob (integer 0-100, probability over 24 months).\n"
+        "net_thesis: one paragraph — reconcile both sides, name the single most important "
+        "variable to watch in next 2 quarters. If Management Commentary or Press Release "
+        "data is above, cite specific numbers in at least one bull point.\n"
+        "<bb_json>\n"
+        "{\"bull\":["
+        "{\"claim\":\"replace with your bull point 1\",\"evidence\":\"specific source\",\"confidence\":\"High\",\"prob\":65},"
+        "{\"claim\":\"replace with your bull point 2\",\"evidence\":\"specific source\",\"confidence\":\"Medium\",\"prob\":55},"
+        "{\"claim\":\"replace with your bull point 3\",\"evidence\":\"specific source\",\"confidence\":\"Medium\",\"prob\":50}"
+        "],\"bear\":["
+        "{\"claim\":\"replace with your bear point 1\",\"evidence\":\"specific source\",\"confidence\":\"High\",\"prob\":60},"
+        "{\"claim\":\"replace with your bear point 2\",\"evidence\":\"specific source\",\"confidence\":\"High\",\"prob\":55},"
+        "{\"claim\":\"replace with your bear point 3\",\"evidence\":\"specific source\",\"confidence\":\"Medium\",\"prob\":40}"
+        "],\"net_thesis\":\"replace with your one-paragraph net thesis\"}\n"
+        "</bb_json>\n\n"
+        "## What to watch\n"
         "3-4 bullets of the most important forward-looking risks or thesis-confirming signals "
         "to monitor. Prioritise what would most change your view.\n"
     )
 
 
+def _parse_bull_bear(text: str) -> tuple:
+    """Extract <bb_json>...</bb_json> (or legacy [BB_JSON]...[/BB_JSON]) block from AI output.
+    Returns (bull_bear_dict_or_None, markdown_pre, markdown_post).
+    """
+    import re as _re
+    # Try new XML-style tags first, then legacy bracket tags
+    pattern = _re.compile(r'<bb_json>(.*?)</bb_json>', _re.DOTALL)
+    match = pattern.search(text)
+    if not match:
+        pattern = _re.compile(r'\[BB_JSON\](.*?)\[/BB_JSON\]', _re.DOTALL)
+        match = pattern.search(text)
+    bull_bear = None
+    if match:
+        json_str = match.group(1).strip()
+        # Strip the entire BB_JSON block from the text
+        cleaned = text[:match.start()].rstrip() + "\n\n" + text[match.end():].lstrip()
+        # Also strip '## Bull vs Bear Scorecard' heading if present just before the block
+        cleaned = _re.sub(r'\n*## Bull vs Bear Scorecard\n+', '\n', cleaned)
+        cleaned = cleaned.strip()
+        try:
+            bull_bear = json.loads(json_str)
+            # Add computed averages for template use
+            bull_probs = [pt.get("prob", 50) for pt in (bull_bear.get("bull") or [])]
+            bear_probs = [pt.get("prob", 50) for pt in (bull_bear.get("bear") or [])]
+            bull_bear["bull_avg_prob"] = round(sum(bull_probs) / len(bull_probs)) if bull_probs else 50
+            bull_bear["bear_avg_prob"] = round(sum(bear_probs) / len(bear_probs)) if bear_probs else 50
+        except (json.JSONDecodeError, ValueError, AttributeError):
+            log.warning("Failed to parse bull_bear JSON block")
+            bull_bear = None
+            cleaned = text
+    else:
+        cleaned = text
+
+    # Split at '## What to watch'
+    ww_match = _re.search(r'(?m)^## What to watch', cleaned)
+    if ww_match:
+        markdown_pre = cleaned[:ww_match.start()].rstrip()
+        markdown_post = cleaned[ww_match.start():]
+    else:
+        markdown_pre = cleaned
+        markdown_post = ""
+
+    return bull_bear, markdown_pre, markdown_post
+
+
 def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
                moat_hypothesis: str = "", raw: dict | None = None,
                competition: dict | None = None,
-               fundamental_analysis: dict | None = None) -> dict:
-    """Returns {markdown, model, input_tokens, output_tokens, cost_usd, used_ai}."""
+               fundamental_analysis: dict | None = None,
+               transition_score: dict | None = None,
+               transcript_synth: dict | None = None,
+               filing_synth: dict | None = None,
+               pr_synth: dict | None = None) -> dict:
+    """Returns {markdown, markdown_pre, markdown_post, bull_bear, model, input_tokens, output_tokens, cost_usd, used_ai}."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return _fallback(snapshot, moat, valuation, moat_hypothesis,
                          "ANTHROPIC_API_KEY not set — AI synthesis skipped.")
@@ -295,13 +566,17 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
 
     prompt = _build_prompt(snapshot, moat, valuation, red_flags, moat_hypothesis,
                            raw=raw, competition=competition,
-                           fundamental_analysis=fundamental_analysis)
+                           fundamental_analysis=fundamental_analysis,
+                           transition_score=transition_score,
+                           transcript_synth=transcript_synth,
+                           filing_synth=filing_synth,
+                           pr_synth=pr_synth)
 
     try:
         client = anthropic.Anthropic()
         msg = client.messages.create(
             model=MODEL,
-            max_tokens=2000,
+            max_tokens=2500,
             temperature=0.2,  # low temp = more consistent, less hallucination
             messages=[{"role": "user", "content": prompt}],
         )
@@ -314,8 +589,13 @@ def synthesize(snapshot: dict, moat: dict, valuation: dict, red_flags: list,
     out_tok = msg.usage.output_tokens
     cost = (in_tok / 1_000_000) * 1.0 + (out_tok / 1_000_000) * 5.0
 
+    bull_bear, markdown_pre, markdown_post = _parse_bull_bear(text)
+
     return {
-        "markdown": text,
+        "markdown": text,          # original (backward compat)
+        "markdown_pre": markdown_pre,
+        "markdown_post": markdown_post,
+        "bull_bear": bull_bear,
         "model": MODEL,
         "input_tokens": in_tok,
         "output_tokens": out_tok,
@@ -974,7 +1254,10 @@ def _build_interest_trend(raw: dict) -> dict | None:
     Shows EBIT, interest expense, coverage ratio and interest as % of revenue
     for up to 8 years. Also returns a summary strip of current-year figures.
     """
-    income_a = raw.get("income_annual") or []
+    income_a  = raw.get("income_annual") or []
+    bal_a     = raw.get("balance_annual") or []
+    ratios_a  = raw.get("ratios_annual") or []
+    km_a      = raw.get("key_metrics_annual") or []
     if not income_a:
         return None
 
@@ -1001,8 +1284,47 @@ def _build_interest_trend(raw: dict) -> dict | None:
         if v >= 0:      return "bad"
         return "critical"   # negative EBIT — can't cover at all
 
+    # Build balance sheet total-debt lookup by year (used to detect real debt even
+    # when income statement shows $0 interest — e.g. companies whose interest income
+    # offsets interest expense and FMP reports only the net figure)
+    debt_by_year: dict[str, float] = {}
+    for bal in bal_a:
+        y = str(bal.get("calendarYear") or (bal.get("date") or "")[:4] or "")
+        td = _s(bal.get("totalDebt"))
+        if y and td is not None:
+            debt_by_year[y] = td
+
+    # Build interest-coverage-ratio lookup — try ratios_annual first, then
+    # key_metrics_annual as fallback (both may report coverage; key_metrics
+    # is often more accurate for the most recent FY when ratios hasn't updated yet).
+    ratios_ic_by_year: dict[str, float] = {}
+    for r in ratios_a:
+        y = str(r.get("calendarYear") or (r.get("date") or "")[:4] or "")
+        ic = _s(r.get("interestCoverageRatio") or r.get("interestCoverage"))
+        # Only store positive values (negative or 0 means FMP saw ~$0 interest expense)
+        if y and ic is not None and ic > 0:
+            ratios_ic_by_year[y] = ic
+    for km in km_a:
+        y = str(km.get("calendarYear") or (km.get("date") or "")[:4] or "")
+        ic = _s(km.get("interestCoverage") or km.get("interestCoverageRatio"))
+        # key_metrics wins if ratios_annual missed this year
+        if y and ic is not None and ic > 0 and y not in ratios_ic_by_year:
+            ratios_ic_by_year[y] = ic
+
+    # Ultimate fallback for the most recent fiscal year: use TTM coverage ratio.
+    # Both ratios_annual and key_metrics_annual derive coverage from the same FMP
+    # income statement, so if FMP reports $0 interest expense (e.g. Nokia FY2025
+    # where interest income offsets interest expense and only net is reported),
+    # neither annual source has a valid coverage. The TTM endpoint often uses a
+    # different computation path that picks up the correct figure.
+    _rtm_raw = raw.get("ratios_ttm") or []
+    _rtm_d = (_rtm_raw[0] if isinstance(_rtm_raw, list) and _rtm_raw else
+              (_rtm_raw if isinstance(_rtm_raw, dict) else {}))
+    _ttm_ic = (_s(_rtm_d.get("interestCoverageRatioTTM"))
+               or _s(_rtm_d.get("interestCoverageTTM")))
+
     rows = []
-    for inc in income_a[:8]:
+    for i, inc in enumerate(income_a[:8]):
         year = str(inc.get("calendarYear") or (inc.get("date") or "")[:4] or "")
         if not year:
             continue
@@ -1021,28 +1343,50 @@ def _build_interest_trend(raw: dict) -> dict | None:
 
         ebitda = (ebit + da) if (ebit is not None and da is not None) else None
 
+        no_interest = interest is None or interest <= 1_000   # <$1k → treat as no debt
+        interest_estimated = False
+
+        # Override: if balance sheet shows real debt (>$100M) but income statement
+        # reports near-zero interest, FMP likely shows only net interest (income minus
+        # expense). Try to reconstruct gross interest from the coverage ratio.
+        # Lookup chain: ratios_annual → key_metrics_annual → TTM (most recent FY only).
+        year_debt = debt_by_year.get(year, 0)
+        if no_interest and year_debt > 100_000_000 and ebit is not None:
+            ratio_ic = ratios_ic_by_year.get(year)
+            # For the most recent fiscal year, fall back to TTM coverage if annual
+            # sources also show zero (e.g. Nokia FY2025: FMP reports $0 net interest
+            # in the income statement, so both annual sources compute coverage = 0).
+            if (ratio_ic is None or ratio_ic <= 0) and i == 0 and _ttm_ic and _ttm_ic > 0:
+                ratio_ic = _ttm_ic
+            if ratio_ic is not None and ratio_ic > 0:
+                implied = abs(ebit / ratio_ic)
+                if implied > 1_000:
+                    interest = implied
+                    no_interest = False
+                    interest_estimated = True
+
         tie_ebit   = None
         tie_ebitda = None
-        no_interest = interest is None or interest <= 1_000   # <$1k → treat as no debt
-        if not no_interest:
+        if not no_interest and interest:
             tie_ebit   = round(ebit   / interest, 1) if ebit   is not None else None
             tie_ebitda = round(ebitda / interest, 1) if ebitda is not None else None
 
         interest_pct_rev = (
             round(interest / rev * 100, 2)
-            if (not no_interest and rev and rev > 0) else None
+            if (not no_interest and interest and rev and rev > 0) else None
         )
 
         rows.append({
-            "year":              year,
-            "ebit_b":            _bn(ebit),
-            "ebitda_b":          _bn(ebitda),
-            "interest_b":        _bn(interest) if not no_interest else None,
-            "interest_pct_rev":  interest_pct_rev,
-            "tie_ebit":          tie_ebit,
-            "tie_ebitda":        tie_ebitda,
-            "tie_q":             _tie_q(tie_ebit),
-            "no_interest":       no_interest,
+            "year":               year,
+            "ebit_b":             _bn(ebit),
+            "ebitda_b":           _bn(ebitda),
+            "interest_b":         _bn(interest) if not no_interest else None,
+            "interest_pct_rev":   interest_pct_rev,
+            "tie_ebit":           tie_ebit,
+            "tie_ebitda":         tie_ebitda,
+            "tie_q":              _tie_q(tie_ebit),
+            "no_interest":        no_interest,
+            "interest_estimated": interest_estimated,
         })
 
     if not rows:
@@ -1206,12 +1550,546 @@ def _extract_10k_risks(raw: dict) -> list[dict] | None:
     return None
 
 
+def _ai_pr_guidance(raw: dict) -> dict | None:
+    """Use Haiku to extract structured guidance and segment data from press releases.
+
+    Scans the last 8 press releases for:
+      - Current full-year or near-term guidance (metric, range, unit, period)
+      - Segment-level growth callouts with quantitative evidence
+      - Material deal announcements
+      - Share repurchase or executive change news
+
+    Returns a structured dict or None on failure / no data.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    prs = listify((raw or {}).get("press_releases"))[:8]
+    if not prs:
+        return None
+
+    # Build a compact representation of press releases for the prompt
+    pr_text_parts = []
+    for pr in prs:
+        date = (pr.get("date") or pr.get("publishedDate") or "")[:10]
+        title = (pr.get("title") or "").strip()
+        body = (pr.get("text") or pr.get("summary") or "").strip()[:1200]
+        if title:
+            pr_text_parts.append(f"[{date}] {title}\n{body}")
+    if not pr_text_parts:
+        return None
+
+    pr_text = "\n\n---\n\n".join(pr_text_parts[:6])
+
+    try:
+        import anthropic, json as _json
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model=MODEL,
+            max_tokens=800,
+            temperature=0,
+            system=(
+                "You are a financial analyst extracting structured data from corporate press releases. "
+                "Return ONLY a JSON object (no markdown, no explanation) with this exact structure:\n"
+                '{\n'
+                '  "current_guidance": {\n'
+                '    "metric": "string or null",\n'
+                '    "range_low": number_or_null,\n'
+                '    "range_high": number_or_null,\n'
+                '    "unit": "string or null",\n'
+                '    "period": "string or null",\n'
+                '    "raised_or_held": "raised|held|lowered|initiated|null"\n'
+                '  },\n'
+                '  "segment_callouts": [\n'
+                '    {"segment": "string", "growth_pct": number_or_null, "quote": "exact quote ≤20 words"}\n'
+                '  ],\n'
+                '  "deal_announcements": [\n'
+                '    {"counterparty": "string", "deal_type": "string", "size": "string or null"}\n'
+                '  ],\n'
+                '  "share_repurchase_news": "string or null",\n'
+                '  "executive_changes": "string or null"\n'
+                "}\n\n"
+                "Rules:\n"
+                "- current_guidance: extract the most recent FORWARD-LOOKING operating profit, revenue, or EPS target. "
+                "  Set range_low/range_high to the numeric values (e.g. 2.0 and 2.5 for '€2.0-2.5 billion'). "
+                "  If guidance was raised vs prior quarter, set raised_or_held='raised'. Null if no guidance found.\n"
+                "- segment_callouts: include any segment with explicit YoY % growth stated (e.g. 'Optical +20%'). Limit to 6.\n"
+                "- deal_announcements: material partnerships, acquisitions, licensing deals. Limit to 4.\n"
+                "- Only extract what is EXPLICITLY stated. Do not infer or estimate.\n"
+                "- If a field has no data, use null or empty array []."
+            ),
+            messages=[{"role": "user", "content": pr_text[:5_000]}],
+        )
+        text = "".join(b.text for b in msg.content if hasattr(b, "text")).strip()
+        result = _json.loads(text)
+        if isinstance(result, dict):
+            log.info("_ai_pr_guidance: guidance=%s, segments=%d",
+                     result.get("current_guidance", {}).get("metric") if result.get("current_guidance") else "none",
+                     len(result.get("segment_callouts") or []))
+            return result
+    except Exception as e:
+        log.warning("_ai_pr_guidance failed: %s", e)
+    return None
+
+
+def _ai_transcript_synthesis(raw: dict) -> dict | None:
+    """Use Haiku to extract structured CEO priorities from the most recent earnings call.
+
+    Returns a structured dict or None if transcript unavailable / AI fails.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    transcripts = listify((raw or {}).get("earnings_transcript_latest"))
+    if not transcripts:
+        return None
+    transcript_obj = transcripts[0] if isinstance(transcripts[0], dict) else {}
+    content = (transcript_obj.get("content") or "").strip()
+    if len(content) < 200:
+        return None
+
+    try:
+        import anthropic, json as _json
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model=MODEL,
+            max_tokens=700,
+            temperature=0,
+            system=(
+                "You are a financial analyst extracting structured data from an earnings call transcript. "
+                "Return ONLY a JSON object (no markdown, no explanation) with this exact structure:\n"
+                '{\n'
+                '  "ceo_priorities": ["string", ...],\n'
+                '  "growth_callouts": [\n'
+                '    {"segment": "string", "claim": "string", "is_quantitative": true|false}\n'
+                '  ],\n'
+                '  "forward_guidance": [\n'
+                '    {"metric": "string", "range": "string", "period": "string"}\n'
+                '  ],\n'
+                '  "qa_concerns": ["string", ...],\n'
+                '  "tone": "bullish|balanced|cautious",\n'
+                '  "new_initiatives": ["string", ...]\n'
+                "}\n\n"
+                "Rules:\n"
+                "- ceo_priorities: 3-5 things the CEO emphasized most (specific, not generic). Limit 5.\n"
+                "- growth_callouts: segments or products with explicit growth claims. is_quantitative=true if % or $ stated. Limit 6.\n"
+                "- forward_guidance: any specific forward metric (revenue, profit, margin target) with range and period. Limit 4.\n"
+                "- qa_concerns: things analysts pushed back on or expressed concern about. Limit 4.\n"
+                "- tone: overall management tone on the call.\n"
+                "- new_initiatives: newly announced products, partnerships, strategic pivots. Limit 4.\n"
+                "- Extract only what is EXPLICITLY stated. Do not infer."
+            ),
+            messages=[{"role": "user", "content": content[:5_000]}],
+        )
+        text = "".join(b.text for b in msg.content if hasattr(b, "text")).strip()
+        result = _json.loads(text)
+        if isinstance(result, dict):
+            log.info("_ai_transcript_synthesis: tone=%s, priorities=%d",
+                     result.get("tone"), len(result.get("ceo_priorities") or []))
+            return result
+    except Exception as e:
+        log.warning("_ai_transcript_synthesis failed: %s", e)
+    return None
+
+
+def _ai_filing_synthesis(raw: dict) -> dict | None:
+    """Use Haiku to extract strategic priorities and growth drivers from 10-K/20-F sections.
+
+    Uses _filing_sections[business_desc] + _filing_sections[mdna] when available.
+    Returns a structured dict or None on failure.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    filing_sections = (raw or {}).get("_filing_sections") or {}
+    business_desc = (filing_sections.get("business_desc") or "").strip()
+    mdna = (filing_sections.get("mdna") or "").strip()
+    if not business_desc and not mdna:
+        return None
+
+    combined = ""
+    if business_desc:
+        combined += f"=== BUSINESS DESCRIPTION (Item 1 / Item 4) ===\n{business_desc[:3_500]}\n\n"
+    if mdna:
+        combined += f"=== MD&A / OPERATING REVIEW (Item 7 / Item 5) ===\n{mdna[:3_500]}\n\n"
+    if len(combined) < 300:
+        return None
+
+    try:
+        import anthropic, json as _json
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model=MODEL,
+            max_tokens=700,
+            temperature=0,
+            system=(
+                "You are a financial analyst extracting strategic data from annual report sections. "
+                "Return ONLY a JSON object (no markdown, no explanation) with this exact structure:\n"
+                '{\n'
+                '  "strategic_priorities": ["string", ...],\n'
+                '  "growth_drivers_cited": ["string", ...],\n'
+                '  "headwinds_acknowledged": ["string", ...],\n'
+                '  "segment_strategy": [\n'
+                '    {"segment": "string", "direction": "growing|stable|declining|restructuring", "rationale": "string"}\n'
+                '  ],\n'
+                '  "patents_ip_revenue": "string or null",\n'
+                '  "moat_language_score": number_0_to_10\n'
+                "}\n\n"
+                "Rules:\n"
+                "- strategic_priorities: named priorities from the business description (specific, not generic). Limit 5.\n"
+                "- growth_drivers_cited: what management explicitly says is driving or will drive growth. Limit 5.\n"
+                "- headwinds_acknowledged: risks or headwinds management explicitly names. Limit 4.\n"
+                "- segment_strategy: for each named business segment. Limit 5.\n"
+                "- patents_ip_revenue: extract specific IP/licensing revenue details if mentioned (e.g. 'Patent licensing revenue €1.3B FY2024, 5G/6G SEPs').\n"
+                "- moat_language_score: 0-10 how strongly the text uses moat-relevant language (switching costs, patents, contracts, certifications, network effects). 0=none, 10=very explicit.\n"
+                "- Extract only what is EXPLICITLY stated."
+            ),
+            messages=[{"role": "user", "content": combined[:7_000]}],
+        )
+        text = "".join(b.text for b in msg.content if hasattr(b, "text")).strip()
+        result = _json.loads(text)
+        if isinstance(result, dict):
+            log.info("_ai_filing_synthesis: priorities=%d, moat_score=%s",
+                     len(result.get("strategic_priorities") or []), result.get("moat_language_score"))
+            return result
+    except Exception as e:
+        log.warning("_ai_filing_synthesis failed: %s", e)
+    return None
+
+
+def _build_guidance_tracker(pr_synth: dict | None, fundamentals: dict | None, raw: dict | None,
+                            transcript_synth: dict | None = None) -> dict | None:
+    """Compare the extracted forward guidance vs the most recent prior-year actual.
+
+    Primary source: pr_synth (press-release AI extraction).
+    Fallback: transcript_synth.forward_guidance (earnings call).
+    Returns a dict suitable for rendering a guidance tracker table, or None if no guidance found.
+    """
+    # Try PR synth first, fall back to transcript
+    g = (pr_synth or {}).get("current_guidance") if pr_synth else None
+
+    # Transcript fallback: take the first quantitative guidance item
+    if (not g or not g.get("metric")) and transcript_synth:
+        for tg in (transcript_synth.get("forward_guidance") or []):
+            if tg.get("metric") and tg.get("range"):
+                # Parse a simple "X–Y" or "X to Y" range string
+                import re as _re
+                nums = _re.findall(r'[\d]+\.?[\d]*', tg["range"])
+                g = {
+                    "metric": tg["metric"],
+                    "range_low":  float(nums[0]) if len(nums) >= 1 else None,
+                    "range_high": float(nums[1]) if len(nums) >= 2 else None,
+                    "unit": "",  # unit not always available from transcript
+                    "period": tg.get("period") or "",
+                    "raised_or_held": None,
+                }
+                break
+
+    if not g or not g.get("metric"):
+        return None
+
+    low = g.get("range_low")
+    high = g.get("range_high")
+    unit = g.get("unit") or ""
+    period = g.get("period") or ""
+    metric = g.get("metric") or ""
+    raised = g.get("raised_or_held")
+
+    if low is None and high is None:
+        return None
+
+    # Format the guidance range string
+    if low is not None and high is not None:
+        guidance_str = f"{unit} {low:.1f}–{high:.1f}".strip()
+        midpoint_val = (low + high) / 2
+    elif low is not None:
+        guidance_str = f"{unit} ≥{low:.1f}".strip()
+        midpoint_val = low
+    else:
+        guidance_str = f"{unit} ≤{high:.1f}".strip()
+        midpoint_val = high
+
+    # Try to find the prior-year actual for the same metric
+    # We look at the most recent annual income statement
+    prior_actual = None
+    prior_year_label = ""
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    income_a = listify((raw or {}).get("income_annual")) if raw else []
+    if income_a:
+        inc = income_a[0]
+        yr = str(inc.get("calendarYear") or (inc.get("date") or "")[:4] or "")
+        metric_lower = metric.lower()
+
+        # Choose the right actual based on the guidance metric name
+        if any(kw in metric_lower for kw in ("operating profit", "ebit", "operating income")):
+            v = _s(inc.get("operatingIncome"))
+        elif any(kw in metric_lower for kw in ("revenue", "net sales", "sales")):
+            v = _s(inc.get("revenue"))
+        elif any(kw in metric_lower for kw in ("ebitda",)):
+            v = _s(inc.get("ebitda"))
+        elif any(kw in metric_lower for kw in ("net income", "net profit", "net earnings")):
+            v = _s(inc.get("netIncome"))
+        elif any(kw in metric_lower for kw in ("eps", "earnings per share")):
+            v = _s(inc.get("epsdiluted") or inc.get("eps"))
+        else:
+            # Default: operating income (most common guidance metric)
+            v = _s(inc.get("operatingIncome"))
+
+        if v is not None:
+            # Convert to the same unit as guidance (assume guidance is in billions if unit contains 'B' or 'billion')
+            unit_lower = unit.lower()
+            if "billion" in unit_lower or unit_lower.endswith("b"):
+                v_converted = v / 1e9
+            elif "million" in unit_lower or unit_lower.endswith("m"):
+                v_converted = v / 1e6
+            else:
+                v_converted = v / 1e9  # default to billions for large companies
+            prior_actual = round(v_converted, 2)
+            prior_year_label = f"FY{yr}"
+
+    # Compute implied growth
+    def _growth_str(guidance_v, actual_v):
+        if actual_v and actual_v > 0 and guidance_v is not None:
+            g_pct = (guidance_v / actual_v - 1) * 100
+            return f"{g_pct:+.0f}%"
+        return "n/a"
+
+    implied_low  = _growth_str(low,          prior_actual)
+    implied_high = _growth_str(high,         prior_actual)
+    implied_mid  = _growth_str(midpoint_val, prior_actual)
+
+    prior_str = f"{unit} {prior_actual:.2f} ({prior_year_label})".strip() if prior_actual is not None else "n/a"
+    midpoint_str = f"{unit} {midpoint_val:.2f} ({implied_mid})".strip()
+
+    return {
+        "metric":          metric,
+        "guidance_range":  guidance_str,
+        "period":          period,
+        "prior_actual":    prior_str,
+        "implied_low":     implied_low,
+        "implied_high":    implied_high,
+        "midpoint":        midpoint_str,
+        "raised_or_held":  raised,
+    }
+
+
+def _build_quarterly_trend(raw: dict) -> dict | None:
+    """Quarter-over-quarter revenue momentum using YoY comparison to avoid seasonality.
+
+    Requires income_quarter with ≥5 entries (need current Q + same Q one year ago).
+    Returns rows for the 4 most recent quarters + an acceleration signal badge.
+    """
+    inc_q = raw.get("income_quarter") or []
+    if len(inc_q) < 5:
+        return None
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    def _quarter_label(date_str: str) -> str:
+        """Convert '2024-09-30' → 'Q3 2024'."""
+        try:
+            from datetime import date as _date
+            d = _date.fromisoformat(date_str[:10])
+            q = (d.month - 1) // 3 + 1
+            return f"Q{q} {d.year}"
+        except Exception:
+            return date_str[:7]
+
+    # Most recent 4 quarters = indices 0-3; same Q one year ago = indices 4-7
+    # We pair index i with index i+4 for YoY comparison
+    rows = []
+    for i in range(min(4, len(inc_q) - 1)):
+        cur = inc_q[i]
+        # Find the matching prior-year quarter (same calendar quarter, ~4 quarters back)
+        # Use index 4 as the prior-year proxy (works when quarterly data is evenly spaced)
+        prior_idx = i + 4
+        if prior_idx >= len(inc_q):
+            continue
+        prior = inc_q[prior_idx]
+
+        rev_cur   = _s(cur.get("revenue"))
+        rev_prior = _s(prior.get("revenue"))
+        op_cur    = _s(cur.get("operatingIncome"))
+        op_prior  = _s(prior.get("operatingIncome"))
+        date_str  = cur.get("date") or cur.get("period") or ""
+
+        if not rev_cur or rev_cur <= 0:
+            continue
+
+        yoy_pct = round((rev_cur / rev_prior - 1) * 100, 1) if (rev_prior and rev_prior > 0) else None
+        op_margin = round(op_cur / rev_cur * 100, 1) if op_cur is not None else None
+
+        # YoY operating margin delta
+        if op_prior is not None and rev_prior and rev_prior > 0 and op_margin is not None:
+            op_margin_prior = round(op_prior / rev_prior * 100, 1)
+            margin_delta = round(op_margin - op_margin_prior, 1)
+        else:
+            margin_delta = None
+
+        rows.append({
+            "quarter":      _quarter_label(date_str),
+            "revenue_b":    round(rev_cur / 1e9, 2),
+            "yoy_pct":      yoy_pct,
+            "op_margin":    op_margin,
+            "margin_delta": margin_delta,
+        })
+
+    if not rows:
+        return None
+
+    # Acceleration signal: compare 2 most recent vs 2 prior quarters' YoY growth
+    yoy_vals = [r["yoy_pct"] for r in rows if r["yoy_pct"] is not None]
+    if len(yoy_vals) >= 4:
+        recent_avg = sum(yoy_vals[:2]) / 2
+        older_avg  = sum(yoy_vals[2:4]) / 2
+        diff = recent_avg - older_avg
+        if diff >= 2.0:
+            signal = "accelerating"
+            note   = f"recent 2-quarter avg YoY {recent_avg:+.1f}% vs prior 2-quarter avg {older_avg:+.1f}%"
+        elif diff <= -2.0:
+            signal = "decelerating"
+            note   = f"recent 2-quarter avg YoY {recent_avg:+.1f}% vs prior 2-quarter avg {older_avg:+.1f}%"
+        else:
+            signal = "stable"
+            note   = f"recent 2-quarter avg YoY {recent_avg:+.1f}% — consistent with prior quarters"
+    elif len(yoy_vals) >= 2:
+        signal = "stable"
+        note   = "insufficient data for acceleration signal"
+    else:
+        signal = None
+        note   = "insufficient quarterly data"
+
+    return {"rows": rows, "accel_signal": signal, "accel_note": note}
+
+
+def _build_forward_estimates(raw: dict, fundamentals: dict | None) -> dict | None:
+    """Parse analyst forward revenue & EPS estimates from FMP analyst-estimates endpoint.
+
+    Returns rows (future fiscal years) with implied growth vs most recent actual revenue,
+    plus a re-acceleration flag if forward growth exceeds historical 5Y CAGR + 3pp.
+    """
+    estimates = raw.get("analyst_estimates") or []
+    if not estimates:
+        return None
+
+    # Most recent actual revenue for implied growth calculation
+    snap = (fundamentals or {}).get("snapshot") or {}
+    actual_rev = snap.get("revenue_ttm")
+    # Also try from income statement
+    if not actual_rev:
+        income_a = raw.get("income_annual") or []
+        if income_a:
+            def _s(v):
+                try:
+                    x = float(v) if v is not None else None
+                    return None if (x is None or x != x) else x
+                except (TypeError, ValueError):
+                    return None
+            actual_rev = _s(income_a[0].get("revenue"))
+
+    # Historical 5Y revenue CAGR from fundamentals
+    hist_5y_cagr = None
+    if fundamentals:
+        growth = fundamentals.get("growth") or {}
+        cagrs = growth.get("revenue_cagr") or {}
+        hist_5y_cagr = cagrs.get("5y")
+
+    # Most recent actual EPS for implied growth
+    actual_eps = None
+    income_a2 = raw.get("income_annual") or []
+    if income_a2:
+        def _s2(v):
+            try:
+                x = float(v) if v is not None else None
+                return None if (x is None or x != x) else x
+            except (TypeError, ValueError):
+                return None
+        actual_eps = _s2(income_a2[0].get("epsdiluted") or income_a2[0].get("eps"))
+
+    rows = []
+    import datetime as _dt
+    current_year = _dt.date.today().year
+    for est in estimates:
+        if not isinstance(est, dict):
+            continue
+        year_str = str(est.get("date") or est.get("fiscalYear") or "")[:4]
+        try:
+            year_int = int(year_str)
+        except ValueError:
+            continue
+        # Only show future years (or current year if estimates exist)
+        if year_int < current_year:
+            continue
+
+        def _se(v):
+            try:
+                x = float(v) if v is not None else None
+                return None if (x is None or x != x) else x
+            except (TypeError, ValueError):
+                return None
+
+        rev_avg = _se(est.get("estimatedRevenueAvg"))
+        eps_avg = _se(est.get("estimatedEpsAvg"))
+        rev_low = _se(est.get("estimatedRevenueLow"))
+        rev_high = _se(est.get("estimatedRevenueHigh"))
+
+        if rev_avg is None:
+            continue
+
+        rev_growth = round((rev_avg / actual_rev - 1) * 100, 1) if (actual_rev and actual_rev > 0) else None
+        eps_growth = round((eps_avg / actual_eps - 1) * 100, 1) if (actual_eps and actual_eps and actual_eps > 0 and eps_avg) else None
+
+        rows.append({
+            "year":             year_str,
+            "rev_est_b":        round(rev_avg / 1e9, 1),
+            "rev_low_b":        round(rev_low / 1e9, 1) if rev_low else None,
+            "rev_high_b":       round(rev_high / 1e9, 1) if rev_high else None,
+            "rev_growth_pct":   rev_growth,
+            "eps_est":          round(eps_avg, 2) if eps_avg else None,
+            "eps_growth_pct":   eps_growth,
+        })
+
+    if not rows:
+        return None
+
+    rows.sort(key=lambda r: r["year"])
+
+    # Re-acceleration flag: next-year implied growth > historical 5Y CAGR + 3pp
+    next_yr_growth = rows[0].get("rev_growth_pct")
+    reaccel_flag = False
+    vs_historical = None
+    if next_yr_growth is not None and hist_5y_cagr is not None:
+        # hist_5y_cagr may be a decimal (0.08) or pct (8.0) — normalise
+        hist_pct = hist_5y_cagr * 100 if abs(hist_5y_cagr) < 2 else hist_5y_cagr
+        vs_historical = round(next_yr_growth - hist_pct, 1)
+        reaccel_flag = next_yr_growth > hist_pct + 3.0
+
+    return {
+        "rows":            rows,
+        "rev_next_yr_growth": next_yr_growth,
+        "vs_historical_5y":   vs_historical,
+        "reaccel_flag":       reaccel_flag,
+        "hist_5y_cagr_pct":  round(hist_5y_cagr * 100 if hist_5y_cagr and abs(hist_5y_cagr) < 2 else (hist_5y_cagr or 0), 1),
+    }
+
+
 def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
                      raw: dict | None = None,
                      competition: dict | None = None,
                      red_flags: list | None = None,
                      fundamentals: dict | None = None,
-                     ceo: dict | None = None) -> dict:
+                     ceo: dict | None = None,
+                     transition_score: dict | None = None,
+                     deep_research: bool = False) -> dict:
     """Focused Haiku call writing specific analyst commentary for each pillar.
     Receives full context (segments, news, peers, description) so it can name
     actual products, acquisitions, and competitor comparisons."""
@@ -1305,6 +2183,35 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         except ValueError:
             pass
 
+    # ── Deep-research AI synthesis passes ─────────────────────────────────────
+    # Run when deep_research=True OR transition_score >= 45 (auto-trigger).
+    # All three run in parallel via threading (each is a short Haiku call ~1-2s).
+    ts_score = (transition_score or {}).get("score") or 0
+    _run_deep = deep_research or (ts_score >= 45)
+    pr_synth_s4 = None
+    transcript_synth_s4 = None
+    filing_synth_s4 = None
+    if _run_deep and raw:
+        import concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=3) as _ex:
+            _fut_pr  = _ex.submit(_ai_pr_guidance, raw)
+            _fut_tr  = _ex.submit(_ai_transcript_synthesis, raw)
+            _fut_fi  = _ex.submit(_ai_filing_synthesis, raw)
+            try:
+                pr_synth_s4 = _fut_pr.result(timeout=25)
+            except Exception as _e:
+                log.warning("pr_guidance future failed: %s", _e)
+            try:
+                transcript_synth_s4 = _fut_tr.result(timeout=25)
+            except Exception as _e:
+                log.warning("transcript_synth future failed: %s", _e)
+            try:
+                filing_synth_s4 = _fut_fi.result(timeout=25)
+            except Exception as _e:
+                log.warning("filing_synth future failed: %s", _e)
+        log.info("Deep research synth complete: pr=%s, transcript=%s, filing=%s",
+                 bool(pr_synth_s4), bool(transcript_synth_s4), bool(filing_synth_s4))
+
     context_block = ""
     if de_val is not None and de_val < 0:
         context_block += (
@@ -1325,6 +2232,60 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     if flag_lines:
         context_block += "RED FLAGS:\n" + "\n".join(flag_lines) + "\n\n"
 
+    # Inject deep-research synth context when available
+    if transcript_synth_s4:
+        ts_l = []
+        if transcript_synth_s4.get("tone"):
+            ts_l.append(f"Tone: {transcript_synth_s4['tone']}")
+        if transcript_synth_s4.get("ceo_priorities"):
+            ts_l.append("CEO priorities: " + "; ".join(transcript_synth_s4["ceo_priorities"][:4]))
+        if transcript_synth_s4.get("growth_callouts"):
+            calls = [f"{c.get('segment','?')}: {c.get('claim','?')}"
+                     for c in transcript_synth_s4["growth_callouts"][:5]]
+            ts_l.append("Growth callouts: " + "; ".join(calls))
+        if transcript_synth_s4.get("forward_guidance"):
+            gd = [f"{g.get('metric','?')} {g.get('range','?')} ({g.get('period','')})"
+                  for g in transcript_synth_s4["forward_guidance"][:3]]
+            ts_l.append("Call guidance: " + "; ".join(gd))
+        if ts_l:
+            context_block += ("MANAGEMENT COMMENTARY (earnings call):\n"
+                              + "\n".join(f"  {l}" for l in ts_l) + "\n\n")
+
+    if filing_synth_s4:
+        fs_l = []
+        if filing_synth_s4.get("strategic_priorities"):
+            fs_l.append("Strategic priorities: " + "; ".join(filing_synth_s4["strategic_priorities"][:4]))
+        if filing_synth_s4.get("growth_drivers_cited"):
+            fs_l.append("Growth drivers: " + "; ".join(filing_synth_s4["growth_drivers_cited"][:4]))
+        if filing_synth_s4.get("headwinds_acknowledged"):
+            fs_l.append("Headwinds: " + "; ".join(filing_synth_s4["headwinds_acknowledged"][:3]))
+        if filing_synth_s4.get("patents_ip_revenue"):
+            fs_l.append(f"IP/patents: {filing_synth_s4['patents_ip_revenue']}")
+        if fs_l:
+            context_block += ("ANNUAL FILING STRATEGY (10-K/20-F):\n"
+                              + "\n".join(f"  {l}" for l in fs_l) + "\n\n")
+
+    if pr_synth_s4:
+        pr_l = []
+        g = pr_synth_s4.get("current_guidance")
+        if g and g.get("metric"):
+            lo, hi, unit_g = g.get("range_low"), g.get("range_high"), g.get("unit") or ""
+            range_str = (f"{unit_g} {lo:.1f}–{hi:.1f}" if (lo and hi)
+                         else f"{unit_g} {lo:.1f}" if lo else "")
+            pr_l.append(
+                f"Current guidance: {g['metric']} = {range_str.strip()} ({g.get('period','')})"
+                + (f" — {g['raised_or_held']}" if g.get("raised_or_held") else "")
+            )
+        if pr_synth_s4.get("segment_callouts"):
+            segs = [f"{s.get('segment','?')}: "
+                    f"{'+'+str(s['growth_pct'])+'%' if s.get('growth_pct') is not None else '?'} "
+                    f"({s.get('quote','')})"
+                    for s in pr_synth_s4["segment_callouts"][:5]]
+            pr_l.append("Segment callouts: " + "; ".join(segs))
+        if pr_l:
+            context_block += ("PRESS RELEASE EXTRACTS:\n"
+                              + "\n".join(f"  {l}" for l in pr_l) + "\n\n")
+
     # ── Growth sources from pillar points ────────────────────────────────────
     growth_pillar = (fundamental_analysis.get("pillars") or {}).get("growth") or {}
     _CAGR_LABELS = {"Revenue CAGR", "EPS CAGR 5Y", "FCF CAGR 5Y", "Growth trend"}
@@ -1337,6 +2298,65 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     if growth_source_lines:
         context_block += "GROWTH SOURCES (use these for the GROWTH pillar analysis):\n"
         context_block += "\n".join(growth_source_lines) + "\n\n"
+
+    # ── Quarterly momentum signal ─────────────────────────────────────────────
+    qt = _build_quarterly_trend(raw) if raw else None
+    if qt and qt.get("accel_signal"):
+        signal_word = {"accelerating": "ACCELERATING ↑", "decelerating": "DECELERATING ↓",
+                       "stable": "STABLE →"}.get(qt["accel_signal"], qt["accel_signal"].upper())
+        context_block += (
+            f"QUARTERLY REVENUE MOMENTUM: {signal_word} — {qt['accel_note']}\n"
+            "  Recent quarters (YoY growth):\n"
+        )
+        for row in qt["rows"][:4]:
+            yoy = f"{row['yoy_pct']:+.1f}%" if row["yoy_pct"] is not None else "n/a"
+            context_block += f"    {row['quarter']}: ${row['revenue_b']:.2f}B revenue, {yoy} YoY\n"
+        context_block += "\n"
+
+    # ── Transition Score (forward-looking complement to trailing pillars) ──
+    if transition_score and transition_score.get("score") is not None:
+        ts = transition_score
+        context_block += (
+            f"TRANSITION SCORE (forward-looking, complements pillar scoring): "
+            f"{ts['score']:.0f}/{int(ts['max_score'])} — {ts['verdict']}\n"
+        )
+        for sig in ts.get("signals", []):
+            if sig.get("pts") is not None:
+                context_block += (
+                    f"  • {sig['name']}: {sig['value']} "
+                    f"({sig['pts']:.0f}/{int(sig['max'])}) — {sig['note']}\n"
+                )
+        # Explicit framing instruction tied to the score threshold
+        score_val = ts.get("score") or 0
+        if score_val >= 30:
+            context_block += (
+                "  → FRAMING: This company shows transition/re-acceleration signals. "
+                "When analysing the GROWTH and PROFITABILITY pillars, distinguish between "
+                "TRAILING evidence (multi-year CAGR, current ROIC) and STRUCTURAL/FORWARD "
+                "evidence (recent quarterly inflection, margin expansion, segment mix shift "
+                "toward higher-growth products). A company can have a structural moat "
+                "temporarily masked by a capex cycle — frame the moat with "
+                "'Structural: Yes / Trailing: No' rather than a single binary judgement. "
+                "Do NOT label this 'no moat' on the basis of trailing ROIC alone.\n"
+            )
+        context_block += "\n"
+
+    # ── Forward analyst estimates ─────────────────────────────────────────────
+    fe = _build_forward_estimates(raw, fundamentals) if raw else None
+    if fe and fe.get("rows"):
+        context_block += "ANALYST FORWARD ESTIMATES:\n"
+        for row in fe["rows"][:3]:
+            gr = f"{row['rev_growth_pct']:+.1f}%" if row["rev_growth_pct"] is not None else "n/a"
+            context_block += f"  FY{row['year']}: Rev ${row['rev_est_b']:.1f}B ({gr} implied)"
+            if row.get("eps_est"):
+                context_block += f", EPS ${row['eps_est']:.2f}"
+            context_block += "\n"
+        if fe.get("reaccel_flag"):
+            context_block += (
+                f"  ⚡ Analysts project re-acceleration: +{fe['vs_historical_5y']:+.1f}pp "
+                f"vs historical 5Y CAGR ({fe['hist_5y_cagr_pct']:+.1f}%)\n"
+            )
+        context_block += "\n"
 
     # ── Per-$1,000 block for BUSINESS_MODEL section ───────────────────────────
     per1000_lines: list[str] = []
@@ -1362,6 +2382,21 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     if per1000_lines:
         context_block += "\n".join(per1000_lines) + "\n\n"
 
+    # Verified headline numbers — AI must use these, not training-data memory
+    snap = snapshot  # alias for clarity
+    verified_nums = []
+    for label, key in [("Revenue (most recent FY)", "revenue_ttm"), ("Market cap", "market_cap"),
+                       ("FCF TTM", "fcf_ttm"), ("Net income TTM", "net_income_ttm")]:
+        v = snap.get(key)
+        if v is not None:
+            verified_nums.append(f"  {label}: ${v/1e9:.1f}B")
+    if verified_nums:
+        context_block = (
+            "VERIFIED KEY FINANCIALS (use these exact numbers — do not use training-data memory for revenue or market cap):\n"
+            + "\n".join(verified_nums) + "\n\n"
+            + context_block
+        )
+
     prompt = (
         f"You are a strict equity analyst. Write a specific, insightful Step 4 assessment "
         f"for {ticker} ({name}), a {sector} / {industry} company.\n\n"
@@ -1374,11 +2409,14 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
         "- Reference the peer comparison or segment data when relevant\n"
         "- If something is weak, say so directly\n"
         "- Never use vague filler like 'the company performs well'\n\n"
-        "For GROWTH specifically, address the four sources of growth:\n"
+        "For GROWTH specifically, address the five sources of growth:\n"
         "  (1) Volume — selling more of existing products (organic revenue growth)\n"
         "  (2) Pricing — are gross margins expanding, stable, or contracting vs history?\n"
         "  (3) New products/services — are new segments appearing in revenue breakdown?\n"
         "  (4) M&A — does goodwill growth indicate acquisition-driven revenue?\n"
+        "  (5) Forward cycle — for cyclical sectors: is external demand (AI infrastructure "
+        "buildout, enterprise refresh, regulatory-driven capex) accelerating or decelerating "
+        "in recent quarters? Reference quarterly acceleration signal if mentioned above.\n"
         "Identify which sources are driving growth and which are absent.\n\n"
         "For BUSINESS_MODEL write 2-3 plain-English sentences that explain how this business "
         "makes money, using the per-$1,000 data above. Write as if explaining to a smart "
@@ -1438,15 +2476,24 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     log.info("Step4 parsed %d/6 sections for %s", filled, ticker)
     result["_per1000"]          = per1000
     result["_cash_gen"]         = _build_cash_gen(fundamentals)
-    result["_cap_alloc"]        = _build_cap_alloc(raw)                         if raw else None
-    result["_margin_trend"]     = _build_margin_trend(raw)                      if raw else None
-    result["_earnings_quality"] = _build_earnings_quality(raw)                  if raw else None
-    result["_growth_quality"]   = _build_growth_quality(raw)                    if raw else None
-    result["_balance_sheet"]    = _build_balance_sheet_viz(raw, fundamentals)          if raw else None
-    result["_net_debt_trend"]   = _build_net_debt_trend(raw, fundamentals)             if raw else None
-    result["_interest_trend"]   = _build_interest_trend(raw)                           if raw else None
-    result["_roic_wacc"]        = _build_roic_wacc_trend(raw, fundamentals, ceo)      if raw else None
-    result["_10k_risks"]        = _extract_10k_risks(raw)                              if raw else None
+    result["_cap_alloc"]        = _build_cap_alloc(raw)                               if raw else None
+    result["_margin_trend"]     = _build_margin_trend(raw)                            if raw else None
+    result["_earnings_quality"] = _build_earnings_quality(raw)                        if raw else None
+    result["_growth_quality"]   = _build_growth_quality(raw)                          if raw else None
+    result["_balance_sheet"]    = _build_balance_sheet_viz(raw, fundamentals)         if raw else None
+    result["_net_debt_trend"]   = _build_net_debt_trend(raw, fundamentals)            if raw else None
+    result["_interest_trend"]   = _build_interest_trend(raw)                          if raw else None
+    result["_roic_wacc"]        = _build_roic_wacc_trend(raw, fundamentals, ceo)     if raw else None
+    result["_10k_risks"]        = _extract_10k_risks(raw)                             if raw else None
+    result["_quarterly_trend"]  = _build_quarterly_trend(raw)                         if raw else None
+    result["_forward_estimates"]= _build_forward_estimates(raw, fundamentals)         if raw else None
+    # Deep-research synth outputs
+    result["_pr_synth"]          = pr_synth_s4
+    result["_transcript_synth"]  = transcript_synth_s4
+    result["_filing_synth"]      = filing_synth_s4
+    result["_guidance_tracker"]  = _build_guidance_tracker(pr_synth_s4, fundamentals, raw,
+                                       transcript_synth=transcript_synth_s4) if raw else None
+    result["_deep_research_mode"] = ("manual" if deep_research else "auto") if _run_deep else None
     return result
 
 
@@ -1630,6 +2677,9 @@ def _fallback(snapshot, moat, valuation, moat_hypothesis, reason: str) -> dict:
     md += "## What to watch\nCheck the red flags table and 10Y bands for anomalies.\n"
     return {
         "markdown": md,
+        "markdown_pre": md,
+        "markdown_post": "",
+        "bull_bear": None,
         "model": None,
         "input_tokens": 0,
         "output_tokens": 0,

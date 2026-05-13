@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=21">
+<link rel="stylesheet" href="/static/style.css?v=26">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -68,6 +68,11 @@
               or (report.ai_step4._cap_alloc.year if report.ai_step4 and report.ai_step4._cap_alloc else none) %}
     {% if _fy %}<span class="badge" style="background:var(--card-2);color:var(--mute)">Financials: FY{{ _fy }}</span>{% endif %}
     <span class="badge" style="background:var(--card-2);color:var(--mute)">Analysis: {{ report._generated_at[:10] if report._generated_at else 'unknown' }}</span>
+    {% if report.deep_research_mode == 'manual' %}
+    <span class="badge dr-badge dr-manual" title="Earnings call, 10-K/20-F, and press-release synthesis was run (manually enabled)">🔬 Deep research (manual)</span>
+    {% elif report.deep_research_mode == 'auto' %}
+    <span class="badge dr-badge dr-auto" title="Deep research auto-triggered because Transition Score ≥ 45">🔬 Deep research (auto)</span>
+    {% endif %}
   </p>
   <div class="snapshot-grid">
     <div><span>Price</span><strong>${{ num(s.price) }}</strong></div>
@@ -423,14 +428,15 @@
         <div class="roic-wacc-line" style="left:{{ (2 / tie_scale * 100) | round(1) }}%"></div>
         <div class="roic-wacc-line" style="left:{{ (5 / tie_scale * 100) | round(1) }}%;background:#5dd39e;opacity:0.4"></div>
       </div>
-      <span class="roic-pct qval {{ row.tie_q if not row.no_interest else '' }}">
-        {% if row.no_interest %}—{% elif row.tie_ebit is not none %}{{ row.tie_ebit }}×{% else %}—{% endif %}
+      <span class="roic-pct qval {{ row.tie_q if not row.no_interest else '' }}"
+            {% if row.interest_estimated %} title="Interest reconstructed from coverage ratio — income statement shows net interest near zero" {% endif %}>
+        {% if row.no_interest %}—{% elif row.tie_ebit is not none %}{{ row.tie_ebit }}×{% if row.interest_estimated %}*{% endif %}{% else %}—{% endif %}
       </span>
       {% if not row.no_interest and row.tie_ebitda is not none %}
       {% set _deq = 'great' if row.tie_ebitda >= 10 else 'good' if row.tie_ebitda >= 5 else 'warn' if row.tie_ebitda >= 2 else 'bad' %}
-      <span class="roic-pct qval {{ _deq }}">{{ row.tie_ebitda }}×</span>
+      <span class="roic-pct qval {{ _deq }}">{{ row.tie_ebitda }}×{% if row.interest_estimated %}*{% endif %}</span>
       {% else %}
-      <span class="roic-pct" style="color:var(--mute)">{% if row.no_interest %}no debt{% else %}—{% endif %}</span>
+      <span class="roic-pct" style="color:var(--mute)">{% if row.no_interest %}—{% else %}—{% endif %}</span>
       {% endif %}
       <span class="roic-spread" style="color:var(--mute)">
         {{ row.interest_pct_rev ~ '%' if row.interest_pct_rev is not none else '—' }}
@@ -438,7 +444,8 @@
     </div>
     {% endfor %}
   </div>
-  <p class="hint" style="margin-top:6px">EBIT = operating profit before interest &amp; tax · EBITDA adds back depreciation &amp; amortisation (better for capital-intensive or growth businesses with large D&amp;A) &nbsp;·&nbsp; <span class="qval great" style="padding:1px 5px;border-radius:3px">≥10×</span> <span class="qval good" style="padding:1px 5px;border-radius:3px">≥5×</span> <span class="qval warn" style="padding:1px 5px;border-radius:3px">≥2×</span> <span class="qval bad" style="padding:1px 5px;border-radius:3px">&lt;2×</span></p>
+  <p class="hint" style="margin-top:6px">EBIT = operating profit before interest &amp; tax · EBITDA adds back depreciation &amp; amortisation (better for capital-intensive or growth businesses with large D&amp;A) &nbsp;·&nbsp; <span class="qval great" style="padding:1px 5px;border-radius:3px">≥10×</span> <span class="qval good" style="padding:1px 5px;border-radius:3px">≥5×</span> <span class="qval warn" style="padding:1px 5px;border-radius:3px">≥2×</span> <span class="qval bad" style="padding:1px 5px;border-radius:3px">&lt;2×</span>
+  {%- if it.rows | selectattr('interest_estimated') | list | length > 0 %} · * interest estimated from coverage ratio (income statement shows net interest near zero — company earns significant interest income offsetting debt expense){%- endif %}</p>
   {% elif it and not it.any_interest %}
   <p class="hint" style="margin-top:12px">No meaningful interest expense detected — company carries little or no debt.</p>
   {% endif %}
@@ -511,9 +518,9 @@
   <div class="cashgen-strip" style="margin-bottom:18px">
     {% if rw.current_roic is not none %}
     <div class="cashgen-cell">
-      <span class="cashgen-label">Current ROIC</span>
+      <span class="cashgen-label">TTM ROIC</span>
       <strong class="cashgen-val {{ 'great' if rw.current_roic >= 20 else 'good' if rw.current_roic >= 12 else 'warn' if rw.current_roic >= 8 else 'bad' }}">{{ rw.current_roic }}%</strong>
-      <span class="cashgen-note">TTM / most recent annual</span>
+      <span class="cashgen-note">trailing 12 months</span>
     </div>
     {% endif %}
     {% if rw.wacc_pct is not none %}
@@ -578,7 +585,7 @@
     </div>
     {% endfor %}
   </div>
-  <p class="hint" style="margin-top:8px">ROIC bands: <span class="qval great" style="padding:1px 5px;border-radius:3px">≥20%</span> <span class="qval good" style="padding:1px 5px;border-radius:3px">≥12%</span> <span class="qval warn" style="padding:1px 5px;border-radius:3px">≥8%</span> <span class="qval bad" style="padding:1px 5px;border-radius:3px">&lt;8%</span> · Spread = ROIC minus WACC · WACC is a sector-based estimate, not company-specific</p>
+  <p class="hint" style="margin-top:8px">ROIC bands: <span class="qval great" style="padding:1px 5px;border-radius:3px">≥20%</span> <span class="qval good" style="padding:1px 5px;border-radius:3px">≥12%</span> <span class="qval warn" style="padding:1px 5px;border-radius:3px">≥8%</span> <span class="qval bad" style="padding:1px 5px;border-radius:3px">&lt;8%</span> · Spread = ROIC minus WACC · WACC is a sector-based estimate, not company-specific · TTM ROIC is trailing-12-month from FMP key metrics; table rows use full fiscal-year statements (minor differences are normal)</p>
 </section>
 {% endif %}
 
@@ -591,7 +598,84 @@
     <p>{{ report.moat_hypothesis }}</p>
   </div>
   {% endif %}
-  <div class="ai-md">{{ ai.markdown | safe_markdown }}</div>
+
+  {# Render executive summary + moat assessment (everything before "What to watch") #}
+  <div class="ai-md">{{ (ai.markdown_pre if ai.markdown_pre is defined else ai.markdown) | safe_markdown }}</div>
+
+  {# ── Bull vs Bear Scorecard (visual) ─────────────────────────────── #}
+  {% if ai.bull_bear is defined and ai.bull_bear %}
+  {% set bb = ai.bull_bear %}
+  {% set bull_avg = bb.bull_avg_prob if bb.bull_avg_prob is defined else 55 %}
+  {% set bear_avg = bb.bear_avg_prob if bb.bear_avg_prob is defined else 45 %}
+  <div class="bb-section">
+    <div class="bb-section-header">
+      <span class="bb-section-title">📊 Bull vs Bear Scorecard</span>
+      <span class="bb-subtitle">24-month probability-weighted thesis points</span>
+    </div>
+
+    {# Probability balance bar #}
+    <div class="bb-balance-bar">
+      <div class="bb-balance-labels">
+        <span class="bb-lbl-bull">🐂 Bull avg {{ bull_avg }}%</span>
+        <span class="bb-lbl-bear">🐻 Bear avg {{ bear_avg }}%</span>
+      </div>
+      <div class="bb-bar-track">
+        <div class="bb-bar-fill" style="width: {{ bull_avg }}%"></div>
+      </div>
+    </div>
+
+    {# Side-by-side columns #}
+    <div class="bb-columns">
+      {# BULL column #}
+      <div class="bb-column bb-bull-col">
+        <div class="bb-col-header bb-bull-hdr">🐂 Bull Case</div>
+        {% if bb.bull %}
+        {% for pt in bb.bull %}
+        <div class="bb-point">
+          <div class="bb-prob-ring bb-prob-bull">{{ pt.prob }}%</div>
+          <div class="bb-point-body">
+            <span class="bb-conf bb-conf-{{ pt.confidence | replace(' ', '') }}">{{ pt.confidence }}</span>
+            <div class="bb-claim">{{ pt.claim }}</div>
+            <div class="bb-evidence">{{ pt.evidence }}</div>
+          </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+      </div>
+
+      {# BEAR column #}
+      <div class="bb-column bb-bear-col">
+        <div class="bb-col-header bb-bear-hdr">🐻 Bear Case</div>
+        {% if bb.bear %}
+        {% for pt in bb.bear %}
+        <div class="bb-point">
+          <div class="bb-prob-ring bb-prob-bear">{{ pt.prob }}%</div>
+          <div class="bb-point-body">
+            <span class="bb-conf bb-conf-bear-{{ pt.confidence | replace(' ', '') }}">{{ pt.confidence }}</span>
+            <div class="bb-claim">{{ pt.claim }}</div>
+            <div class="bb-evidence">{{ pt.evidence }}</div>
+          </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+      </div>
+    </div>{# /bb-columns #}
+
+    {# Net thesis #}
+    {% if bb.net_thesis %}
+    <div class="bb-thesis">
+      <div class="bb-thesis-label">⚖️ Net Thesis</div>
+      <div class="bb-thesis-text">{{ bb.net_thesis }}</div>
+    </div>
+    {% endif %}
+  </div>{# /bb-section #}
+  {% endif %}{# /ai.bull_bear #}
+
+  {# Render "What to watch" section #}
+  {% if ai.markdown_post is defined and ai.markdown_post %}
+  <div class="ai-md">{{ ai.markdown_post | safe_markdown }}</div>
+  {% endif %}
+
   <p class="hint">
     {% if ai.used_ai %}Model: {{ ai.model }} · {{ ai.input_tokens }} in / {{ ai.output_tokens }} out · ~${{ "%.4f"|format(ai.cost_usd) }}
     {% else %}AI synthesis was skipped (see message above).{% endif %}
@@ -843,18 +927,7 @@
     {% if price %}
     <div><span>Current price</span><strong>${{ num(price) }}</strong></div>
     {% endif %}
-    {% if v.analyst.target_consensus is not none %}
-    {% set upside = ((v.analyst.target_consensus - price) / price * 100) if price else none %}
-    <div>
-      <span>Consensus target</span>
-      <strong>${{ num(v.analyst.target_consensus) }}</strong>
-      {% if upside is not none %}
-      <span style="font-size:0.8rem;margin-top:2px;color:{{ 'var(--good)' if upside >= 0 else 'var(--bad)' }}">
-        {{ '%+.1f'|format(upside) }}% vs current
-      </span>
-      {% endif %}
-    </div>
-    {% endif %}
+    {# Median first — more robust to outlier bear/bull targets #}
     {% if v.analyst.target_median is not none %}
     {% set upside_med = ((v.analyst.target_median - price) / price * 100) if price else none %}
     <div>
@@ -867,6 +940,19 @@
       {% endif %}
     </div>
     {% endif %}
+    {# Mean (consensus) second — labelled to show it can be skewed by outliers #}
+    {% if v.analyst.target_consensus is not none %}
+    {% set upside = ((v.analyst.target_consensus - price) / price * 100) if price else none %}
+    <div>
+      <span>Consensus target <span style="font-size:0.75rem;font-weight:400;color:var(--mute)">(mean)</span></span>
+      <strong>${{ num(v.analyst.target_consensus) }}</strong>
+      {% if upside is not none %}
+      <span style="font-size:0.8rem;margin-top:2px;color:{{ 'var(--good)' if upside >= 0 else 'var(--bad)' }}">
+        {{ '%+.1f'|format(upside) }}% vs current
+      </span>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if v.analyst.target_high is not none %}
     <div><span>High / Low target</span><strong>${{ num(v.analyst.target_high) }} / ${{ num(v.analyst.target_low) }}</strong></div>
     {% endif %}
@@ -874,11 +960,105 @@
     <div><span>Buy / Hold / Sell</span><strong>{{ v.analyst.buy }} / {{ v.analyst.hold or '—' }} / {{ v.analyst.sell or '—' }}</strong></div>
     {% endif %}
   </div>
+  <p class="hint" style="margin-top:6px">Median target is the midpoint of analyst estimates and is less affected by extreme outlier targets than the mean. Use the High/Low range to judge analyst disagreement.</p>
+  {% endif %}
+
+  {# Forward analyst revenue & EPS estimates #}
+  {% set fe = report.ai_step4._forward_estimates if report.ai_step4 else none %}
+  {% if fe and fe.rows %}
+  <h3>What analysts expect</h3>
+  <p class="sub">Consensus forward revenue &amp; EPS estimates — how analysts see the business growing from here.</p>
+  {% if fe.reaccel_flag %}
+  <div class="accel-badge accelerating" style="margin-bottom:8px">
+    ⚡ Re-acceleration signal: analysts project +{{ '%+.1f'|format(fe.vs_historical_5y) }}pp above {{ fe.hist_5y_cagr_pct }}% historical 5Y CAGR
+  </div>
+  {% endif %}
+  <div class="tablewrap">
+  <table>
+    <thead><tr>
+      <th>Year</th>
+      <th>Rev. est.</th>
+      <th>Implied growth</th>
+      <th>Range (low / high)</th>
+      <th>EPS est.</th>
+      <th>EPS growth</th>
+    </tr></thead>
+    <tbody>
+    {% for row in fe.rows %}
+    <tr>
+      <td>{{ row.year }}</td>
+      <td>${{ row.rev_est_b }}B</td>
+      <td class="qval {% if row.rev_growth_pct is not none %}{% if row.rev_growth_pct >= 10 %}great{% elif row.rev_growth_pct >= 5 %}good{% elif row.rev_growth_pct >= 0 %}warn{% else %}bad{% endif %}{% endif %}">
+        {% if row.rev_growth_pct is not none %}{{ '%+.1f'|format(row.rev_growth_pct) }}%{% else %}—{% endif %}
+      </td>
+      <td style="color:var(--mute);font-size:0.85rem">
+        {% if row.rev_low_b is not none and row.rev_high_b is not none %}${{ row.rev_low_b }}B — ${{ row.rev_high_b }}B{% else %}—{% endif %}
+      </td>
+      <td>{% if row.eps_est is not none %}${{ row.eps_est }}{% else %}—{% endif %}</td>
+      <td class="qval {% if row.eps_growth_pct is not none %}{% if row.eps_growth_pct >= 15 %}great{% elif row.eps_growth_pct >= 8 %}good{% elif row.eps_growth_pct >= 0 %}warn{% else %}bad{% endif %}{% endif %}">
+        {% if row.eps_growth_pct is not none %}{{ '%+.1f'|format(row.eps_growth_pct) }}%{% else %}—{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint" style="margin-top:5px">Analyst consensus estimates are forward-looking and based on publicly available research. Implied growth is vs. most recent TTM revenue. Treat as directional, not precise.</p>
   {% endif %}
 
   {% if report.story_moat and report.story_moat.components.smart_money %}
   <h3>Smart money</h3>
   <p class="sub">{{ report.story_moat.components.smart_money.note }}</p>
+  {% endif %}
+
+  {# ── Guidance tracker — only shown when deep-research synth ran ── #}
+  {% set gt = report.ai_step4._guidance_tracker if report.ai_step4 else none %}
+  {% if gt %}
+  <h3>Forward guidance vs prior actual</h3>
+  <p class="hint" style="margin-bottom:8px">Management's official guidance compared to the most recent full-year actual. Source: press releases.</p>
+  <table class="guidance-tracker">
+    <tbody>
+    <tr>
+      <td class="gt-label">Metric</td>
+      <td><strong>{{ gt.metric }}</strong></td>
+    </tr>
+    <tr>
+      <td class="gt-label">Period</td>
+      <td>{{ gt.period or '—' }}</td>
+    </tr>
+    <tr>
+      <td class="gt-label">Guidance range</td>
+      <td><strong class="gt-guidance">{{ gt.guidance_range }}</strong>
+        {% if gt.raised_or_held %}
+        <span class="gt-rh gt-{{ gt.raised_or_held }}">{{ gt.raised_or_held }}</span>
+        {% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td class="gt-label">Prior year actual</td>
+      <td>{{ gt.prior_actual or '—' }}</td>
+    </tr>
+    <tr>
+      <td class="gt-label">Implied growth (low / high)</td>
+      <td class="qval {% if gt.implied_low and '+' in gt.implied_low %}great{% elif gt.implied_low and '-' in gt.implied_low %}bad{% endif %}">
+        {{ gt.implied_low or '—' }} / {{ gt.implied_high or '—' }}
+      </td>
+    </tr>
+    <tr>
+      <td class="gt-label">Midpoint</td>
+      <td><strong>{{ gt.midpoint }}</strong></td>
+    </tr>
+    </tbody>
+  </table>
+  {% else %}
+  {# Placeholder: only shown when deep-research has NOT run yet #}
+  {% if not report.deep_research_mode %}
+  <div class="gt-pending">
+    <span class="gt-pending-label">Forward guidance vs prior actual</span>
+    <span class="gt-pending-note">— pending</span>
+    <span class="gt-pending-hint">Available in deep-research mode (enable the 🔬 toggle and force-refresh)</span>
+  </div>
+  {% endif %}
   {% endif %}
 </section>
 
@@ -899,6 +1079,52 @@
     <span class="big-score {{ bq_score_class(fa.total_score, fa.max_score) }}">{{ fa.total_score }}/{{ fa.max_score }}</span>
     <strong>{{ fa.verdict }}</strong>
   </div>
+
+  {# Forward-looking Transition Score — complements the trailing pillar verdict above.
+     Surfaces ROIC trend + quarterly inflection + margin expansion so transition stories
+     (e.g. Nokia 2026 AI optical cycle) are visible alongside the trailing 5-pillar score. #}
+  {% set ts = report.transition_score %}
+  {% if ts %}
+  {% macro ts_class(pct) -%}
+    {%- if pct >= 75 -%}great{%- elif pct >= 50 -%}good{%- elif pct >= 30 -%}warn{%- else -%}bad{%- endif -%}
+  {%- endmacro %}
+  <details class="transition-panel" {% if ts.score_pct >= 50 %}open{% endif %}>
+    <summary class="transition-summary">
+      <span class="ts-label">Transition Score</span>
+      <span class="ts-score {{ ts_class(ts.score_pct) }}">{{ ts.score }}/{{ ts.max_score|int }}</span>
+      <span class="ts-verdict">{{ ts.verdict }}</span>
+      <span class="ts-help" title="Forward-looking complement to the trailing-data Business Quality score above. Captures re-acceleration signals (ROIC trend, quarterly inflection, margin expansion) that trailing CAGRs and ROIC miss.">ⓘ</span>
+    </summary>
+    <div class="transition-body">
+      <p class="sub" style="margin:6px 0 10px">Three forward-looking signals. Higher = stronger evidence of transition / re-acceleration. Does not modify pillar scoring; reframes it.</p>
+      <table class="ts-signals">
+        <tbody>
+        {% for sig in ts.signals %}
+          <tr>
+            <th>{{ sig.name }}</th>
+            <td class="ts-val">{{ sig.value }}</td>
+            <td class="ts-pts {{ ts_class(100 * (sig.pts or 0) / sig.max if sig.max else 0) }}">{{ '%.0f'|format(sig.pts) if sig.pts is not none else '—' }}/{{ sig.max|int }}</td>
+            <td class="ts-note">{{ sig.note }}</td>
+          </tr>
+        {% endfor %}
+        {% for sig in ts.deferred %}
+          <tr class="ts-deferred">
+            <th>{{ sig.name }}</th>
+            <td class="ts-val">—</td>
+            {% if report.deep_research_mode %}
+            <td class="ts-pts" style="color:var(--mute);font-size:0.72rem">N/A</td>
+            <td class="ts-note" style="color:var(--mute)"><em>No data found in press releases / transcript</em></td>
+            {% else %}
+            <td class="ts-pts">pending</td>
+            <td class="ts-note"><em>Enable 🔬 deep research toggle and force-refresh</em></td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
 
   {# Business model plain-English summary (chart moved to top-of-page section) #}
   {% set biz_text = fa_ai.get('business_model') if fa_ai else "" %}
@@ -992,6 +1218,48 @@
   </table>
   </div>
   <p class="hint" style="margin-top:6px">Color bands — <span class="qval great" style="padding:1px 5px;border-radius:3px">≥high</span> <span class="qval good" style="padding:1px 5px;border-radius:3px">good</span> <span class="qval warn" style="padding:1px 5px;border-radius:3px">watch</span> <span class="qval bad" style="padding:1px 5px;border-radius:3px">weak</span> · Gross ≥50/30/15% · Op/FCF ≥20/12/5% · Net ≥15/8/3% · ROIC ≥20/12/8%</p>
+</section>
+{% endif %}
+
+<!-- QUARTERLY REVENUE MOMENTUM -->
+{% set qt = report.ai_step4._quarterly_trend if report.ai_step4 else none %}
+{% if qt and qt.rows %}
+<section class="card">
+  <h2>Recent quarter momentum</h2>
+  <p class="sub">Year-over-year revenue growth by quarter — removes seasonality so you can see whether the business is actually accelerating.</p>
+  {% if qt.accel_signal %}
+  <div class="accel-badge {{ qt.accel_signal }}" style="margin-bottom:10px">
+    {% if qt.accel_signal == 'accelerating' %}Accelerating ↑{% elif qt.accel_signal == 'decelerating' %}Decelerating ↓{% else %}Stable →{% endif %}
+    <span style="font-weight:400;font-size:0.82rem;margin-left:6px">{{ qt.accel_note }}</span>
+  </div>
+  {% endif %}
+  <div class="tablewrap">
+  <table>
+    <thead><tr>
+      <th>Quarter</th>
+      <th>Revenue</th>
+      <th>YoY growth</th>
+      <th>Op. margin</th>
+      <th>Margin Δ YoY</th>
+    </tr></thead>
+    <tbody>
+    {% for row in qt.rows %}
+    <tr>
+      <td>{{ row.quarter }}</td>
+      <td>${{ row.revenue_b }}B</td>
+      <td class="qval {% if row.yoy_pct is not none %}{% if row.yoy_pct >= 10 %}great{% elif row.yoy_pct >= 5 %}good{% elif row.yoy_pct >= 0 %}warn{% else %}bad{% endif %}{% endif %}">
+        {% if row.yoy_pct is not none %}{{ '%+.1f'|format(row.yoy_pct) }}%{% else %}—{% endif %}
+      </td>
+      <td>{% if row.op_margin is not none %}{{ row.op_margin }}%{% else %}—{% endif %}</td>
+      <td class="qval {% if row.margin_delta is not none %}{% if row.margin_delta >= 1 %}great{% elif row.margin_delta >= 0 %}good{% elif row.margin_delta >= -2 %}warn{% else %}bad{% endif %}{% endif %}">
+        {% if row.margin_delta is not none %}{{ '%+.1f'|format(row.margin_delta) }}pp{% else %}—{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint" style="margin-top:5px">YoY growth compares each quarter to the same quarter one year prior (Q3 2025 vs Q3 2024) to eliminate seasonal effects. Acceleration signal compares the two most recent quarters vs prior two.</p>
 </section>
 {% endif %}
 

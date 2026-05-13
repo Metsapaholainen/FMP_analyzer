@@ -170,7 +170,12 @@ def build_ceo_analysis(raw: dict, fundamentals: dict, moat: dict) -> dict:
         acq_5y = sum(abs(_safe(c.get("acquisitionsNet")) or
                          _safe(c.get("businessAcquisitions")) or 0) for c in cf_a[:5])
 
-        reinvest_rate = (capex_5y + rd_5y) / ocf_5y if ocf_5y > 0 else 0
+        # Reinvestment rate = (capex + acquisitions) / OCF.
+        # R&D is excluded here: it is already deducted from operating cash flow
+        # (it's a cash operating expense), so including it in the numerator would
+        # produce ratios >100% for R&D-heavy companies like Nokia, misleading readers.
+        # R&D intensity is captured separately in the moat scoring.
+        reinvest_rate = (capex_5y + acq_5y) / ocf_5y if ocf_5y > 0 else 0
 
         # ROIC trend: is it improving post-reinvestment?
         if len(roic_vals) >= 4:
