@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=26">
+<link rel="stylesheet" href="/static/style.css?v=27">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -606,7 +606,7 @@
   {% endif %}
 
   {# Render executive summary + moat assessment (everything before "What to watch") #}
-  <div class="ai-md">{{ (ai.markdown_pre if ai.markdown_pre is defined else ai.markdown) | safe_markdown }}</div>
+  <div class="ai-md ai-narrative">{{ (ai.markdown_pre if ai.markdown_pre is defined else ai.markdown) | narrative_html }}</div>
 
   {# ── Bull vs Bear Scorecard (visual) ─────────────────────────────── #}
   {% if ai.bull_bear is defined and ai.bull_bear %}
@@ -679,7 +679,7 @@
 
   {# Render "What to watch" section #}
   {% if ai.markdown_post is defined and ai.markdown_post %}
-  <div class="ai-md">{{ ai.markdown_post | safe_markdown }}</div>
+  <div class="ai-md ai-watch-section">{{ ai.markdown_post | narrative_html }}</div>
   {% endif %}
 
   <p class="hint">

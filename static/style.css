@@ -1055,6 +1055,96 @@ footer { margin-top: 30px; }
    backgrounds reliably — use !important on
    every structural element.
    ══════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════
+   v27 — AI Narrative visual enhancements
+   ══════════════════════════════════════════════════════════ */
+
+/* Section headers inside the narrative */
+.ai-narrative h3.ai-section-hdr {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--mute);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 7px;
+  margin: 24px 0 14px;
+  font-weight: 700;
+}
+.ai-narrative h3.ai-section-hdr:first-child { margin-top: 4px; }
+
+/* Each paragraph inside the narrative gets slight breathing room */
+.ai-narrative p { line-height: 1.68; margin: 0 0 10px; }
+
+/* Moat verdict badges — Structural / Trailing chips */
+.mv-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 0.67rem;
+  font-weight: 700;
+  white-space: nowrap;
+  vertical-align: middle;
+  margin: 0 1px;
+}
+.mv-yes     { background: rgba(93,211,158,0.13); color: #5dd39e; border: 1px solid rgba(93,211,158,0.3); }
+.mv-no      { background: rgba(255,107,107,0.12); color: #ff7575; border: 1px solid rgba(255,107,107,0.25); }
+.mv-partial { background: rgba(245,185,66,0.14); color: #f5b942; border: 1px solid rgba(245,185,66,0.28); }
+.mv-masked  { background: rgba(154,161,173,0.12); color: #9aa1ad; border: 1px solid rgba(154,161,173,0.25); }
+.mv-neutral { background: var(--card-2); color: var(--mute); border: 1px solid var(--border); }
+
+/* "What to Watch" numbered list — priority cards */
+ol.ai-watch-list {
+  list-style: none;
+  counter-reset: watch-ctr;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+ol.ai-watch-list li {
+  counter-increment: watch-ctr;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 11px 14px;
+  line-height: 1.55;
+  font-size: 0.84rem;
+}
+ol.ai-watch-list li::before {
+  content: counter(watch-ctr);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #0f1116;
+  font-size: 0.7rem;
+  font-weight: 800;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+/* First watch item gets a slightly more prominent left border */
+ol.ai-watch-list li:first-child {
+  border-left-color: #f5b942;
+}
+ol.ai-watch-list li:first-child::before {
+  background: #f5b942;
+}
+
+/* Watch section header */
+.ai-watch-section h3.ai-section-hdr {
+  margin-top: 0;
+}
+
 @media print {
   /* Tell browser to render background colours */
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }

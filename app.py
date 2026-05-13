@@ -98,6 +98,115 @@ def _safe_markdown(text: str) -> str:
 templates.env.filters["safe_markdown"] = _safe_markdown
 
 
+def _narrative_html(text: str) -> str:
+    """Enhanced markdown renderer for AI narrative sections.
+
+    On top of safe_markdown, adds:
+    - Numbered list support (1. 2. 3.) → styled <ol> watch-list cards
+    - Moat verdict badges: 'Structural: **Yes**' → green/red/amber chip
+    - Section header styling via css class on <h3>
+    """
+    import html as _html
+    import re
+    from markupsafe import Markup
+
+    if not text:
+        return Markup("")
+
+    out_lines: list[str] = []
+    in_ul = False
+    in_ol = False
+
+    for raw in text.split("\n"):
+        line = raw.rstrip()
+
+        if not line.strip():
+            if in_ul:
+                out_lines.append("</ul>"); in_ul = False
+            if in_ol:
+                out_lines.append("</ol>"); in_ol = False
+            out_lines.append("")
+            continue
+
+        if line.startswith("### "):
+            if in_ul: out_lines.append("</ul>"); in_ul = False
+            if in_ol: out_lines.append("</ol>"); in_ol = False
+            out_lines.append(f'<h4>{_html.escape(line[4:])}</h4>')
+            continue
+        if line.startswith("## "):
+            if in_ul: out_lines.append("</ul>"); in_ul = False
+            if in_ol: out_lines.append("</ol>"); in_ol = False
+            out_lines.append(f'<h3 class="ai-section-hdr">{_html.escape(line[3:])}</h3>')
+            continue
+        if line.startswith("# "):
+            if in_ul: out_lines.append("</ul>"); in_ul = False
+            if in_ol: out_lines.append("</ol>"); in_ol = False
+            out_lines.append(f'<h2>{_html.escape(line[2:])}</h2>')
+            continue
+
+        # Unordered bullet list
+        if line.lstrip().startswith(("- ", "* ")):
+            content = line.lstrip()[2:]
+            if in_ol: out_lines.append("</ol>"); in_ol = False
+            if not in_ul:
+                out_lines.append("<ul>"); in_ul = True
+            out_lines.append(f"<li>{_html.escape(content)}</li>")
+            continue
+
+        # Numbered list (1. 2. 3. …)
+        nl_m = re.match(r'^\d+\.\s+(.+)$', line.lstrip())
+        if nl_m:
+            content = nl_m.group(1)
+            if in_ul: out_lines.append("</ul>"); in_ul = False
+            if not in_ol:
+                out_lines.append('<ol class="ai-watch-list">'); in_ol = True
+            out_lines.append(f"<li>{_html.escape(content)}</li>")
+            continue
+
+        if in_ul: out_lines.append("</ul>"); in_ul = False
+        if in_ol: out_lines.append("</ol>"); in_ol = False
+        out_lines.append(f"<p>{_html.escape(line)}</p>")
+
+    if in_ul: out_lines.append("</ul>")
+    if in_ol: out_lines.append("</ol>")
+
+    rendered = "\n".join(out_lines)
+
+    # Bold inline
+    rendered = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", rendered)
+
+    # Moat verdict badges — transform 'Structural: <strong>X</strong>'
+    # and 'Trailing: <strong>X</strong>' into colored chip spans.
+    _BADGE = {
+        "Yes":                 ("mv-yes",     "✓ Yes"),
+        "Supported":           ("mv-yes",     "✓ Supported"),
+        "No":                  ("mv-no",      "✗ No"),
+        "Not supported":       ("mv-no",      "✗ Not supported"),
+        "Partially supported": ("mv-partial", "◑ Partial"),
+        "Partially":           ("mv-partial", "◑ Partial"),
+        "Masked":              ("mv-masked",  "⊘ Masked"),
+    }
+
+    def _badge(m):
+        prefix = m.group(1)   # "Structural" or "Trailing"
+        raw_val = m.group(2)  # text inside <strong>
+        cls, label = _BADGE.get(raw_val, ("mv-neutral", raw_val))
+        return f'{prefix}: <span class="mv-badge {cls}">{label}</span>'
+
+    rendered = re.sub(
+        r'(Structural|Trailing): <strong>'
+        r'(Yes|No|Masked|Partially supported|Partially|Not supported|Supported)'
+        r'</strong>',
+        _badge,
+        rendered,
+    )
+
+    return Markup(rendered)
+
+
+templates.env.filters["narrative_html"] = _narrative_html
+
+
 def _check_password(pwd: str) -> bool:
     expected = os.environ.get("ANALYZER_PASSWORD", "analyze")
     return bool(pwd) and pwd == expected
