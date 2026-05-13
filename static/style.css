@@ -1148,6 +1148,15 @@ ol.ai-watch-list li[data-n="1"]::before {
   /* Tell browser to render background colours */
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 
+  /* Redefine dark-theme CSS variables for white print background.
+     All var(--fg) and var(--mute) references throughout the stylesheet
+     automatically resolve to dark values — no per-class override needed. */
+  :root {
+    --fg:   #1a1a2e;
+    --mute: #4a5568;
+    --bg:   #ffffff;
+  }
+
   /* ── Page geometry ─────────────────────── */
   @page { margin: 12mm 10mm; size: A4 portrait; }
 
