@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=15">
+<link rel="stylesheet" href="/static/style.css?v=16">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -72,6 +72,330 @@
     <div><span>Cash</span><strong>${{ big(s.cash_and_equivalents) }}</strong></div>
   </div>
 </header>
+
+<!-- CAPITAL ALLOCATION CHART -->
+{% set ca = report.ai_step4._cap_alloc if report.ai_step4 else none %}
+{% set cg = report.ai_step4._cash_gen   if report.ai_step4 else none %}
+{% if ca %}
+<section class="card">
+  <h2>Capital allocation</h2>
+  <p class="sub">Where does operating cash flow go? Per $1,000 of OCF{% if ca.year %} · FY{{ ca.year }}{% endif %}{% if ca.ocf_b %} · total ${{ ca.ocf_b }}B{% endif %}</p>
+
+  {% if cg %}
+  <div class="cashgen-strip">
+    {% if cg.ocf_b %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">Operating cash flow</span>
+      <strong class="cashgen-val">{{ cg.ocf_b }}</strong>
+      <span class="cashgen-note">TTM · before capex</span>
+    </div>
+    {% endif %}
+    {% if cg.fcf_b %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">Free cash flow</span>
+      <strong class="cashgen-val">{{ cg.fcf_b }}</strong>
+      <span class="cashgen-note">TTM · after capex</span>
+    </div>
+    {% endif %}
+    {% if cg.fcf_margin %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">FCF margin</span>
+      <strong class="cashgen-val {{ cg.fcf_margin_q }}">{{ cg.fcf_margin }}</strong>
+      <span class="cashgen-note">of every $1 revenue</span>
+    </div>
+    {% endif %}
+    {% if cg.fcf_yield %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">FCF yield</span>
+      <strong class="cashgen-val {{ cg.fcf_yield_q }}">{{ cg.fcf_yield }}</strong>
+      <span class="cashgen-note">FCF ÷ market cap</span>
+    </div>
+    {% endif %}
+    {% if cg.fcf_per_share %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">FCF / share</span>
+      <strong class="cashgen-val">{{ cg.fcf_per_share }}</strong>
+      <span class="cashgen-note">TTM</span>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  <div class="capalloc-grid">
+    {% set alloc_rows = [
+      ("Reinvestment (capex)",    ca.capex,        "#f97316", "maintaining & growing assets"),
+      ("Acquisitions (M&A)",      ca.acquisitions, "#fbbf24", "net M&A spending"),
+      ("Dividends paid",          ca.dividends,    "#2dd4bf", "income return to shareholders"),
+      ("Share buybacks",          ca.buybacks,     "var(--good)", "capital return to shareholders"),
+      ("Debt repaid",             ca.debt_repay,   "#ef4444", "deleveraging"),
+    ] %}
+    {% for label, val, color, note in alloc_rows %}
+      {% if val is not none and val > 0 %}
+      <div class="per1k-row">
+        <span class="per1k-label">{{ label }}</span>
+        <div class="per1k-bar-wrap">
+          <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
+        </div>
+        <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
+        <span class="per1k-subtext">{{ note }}</span>
+      </div>
+      {% endif %}
+    {% endfor %}
+    {% if ca.sbc and ca.sbc > 0 %}
+    <div class="per1k-row per1k-derived" style="margin-top:2px">
+      <span class="per1k-label" style="color:#c084fc">SBC (stock comp dilution)</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ ((ca.sbc / 10) | round(1)) }}%;background:#c084fc;opacity:0.5"></div>
+      </div>
+      <span class="per1k-val" style="color:#c084fc">${{ ca.sbc }}</span>
+      <span class="per1k-subtext">non-cash; reduces net buyback impact (net return = buybacks − SBC)</span>
+    </div>
+    {% endif %}
+    {% if (ca.debt_issued and ca.debt_issued > 0) or (ca.stock_issued and ca.stock_issued > 0) or (ca.divestitures and ca.divestitures > 0) %}
+    <div class="per1k-divider"></div>
+    {% if ca.divestitures and ca.divestitures > 0 %}
+    <div class="per1k-row">
+      <span class="per1k-label" style="color:#fbbf24">+ Asset / business sales</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ ((ca.divestitures / 10) | round(1)) }}%;background:#fbbf24;opacity:0.7"></div>
+      </div>
+      <span class="per1k-val" style="color:#fbbf24">+${{ ca.divestitures }}</span>
+      <span class="per1k-subtext">divestiture proceeds (net acquisitionsNet positive)</span>
+    </div>
+    {% endif %}
+    {% if ca.debt_issued and ca.debt_issued > 0 %}
+    <div class="per1k-row">
+      <span class="per1k-label" style="color:var(--warn)">+ New loans / debt raised</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ ((ca.debt_issued / 10) | round(1)) }}%;background:var(--warn);opacity:0.7"></div>
+      </div>
+      <span class="per1k-val" style="color:var(--warn)">+${{ ca.debt_issued }}</span>
+      <span class="per1k-subtext">new borrowing adds to allocation pool</span>
+    </div>
+    {% endif %}
+    {% if ca.stock_issued and ca.stock_issued > 0 %}
+    <div class="per1k-row">
+      <span class="per1k-label" style="color:#a78bfa">+ New shares issued</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ ((ca.stock_issued / 10) | round(1)) }}%;background:#a78bfa;opacity:0.7"></div>
+      </div>
+      <span class="per1k-val" style="color:#a78bfa">+${{ ca.stock_issued }}</span>
+      <span class="per1k-subtext">options exercised / secondary offering proceeds</span>
+    </div>
+    {% endif %}
+    {% endif %}
+    {% if ca.residual %}
+    {% if ca.residual > 0 %}
+    <div class="per1k-row per1k-derived">
+      <span class="per1k-label">Cash accumulated</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ ((ca.residual | abs / 10) | round(1)) }}%;background:#94a3b8;opacity:0.5"></div>
+      </div>
+      <span class="per1k-val" style="color:#94a3b8">${{ ca.residual }}</span>
+      <span class="per1k-subtext">balance sheet buffer / other</span>
+    </div>
+    {% else %}
+    <div class="per1k-row per1k-derived">
+      <span class="per1k-label" style="color:var(--mute)">Deficit / other</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ ((ca.residual | abs / 10) | round(1)) }}%;background:var(--bad);opacity:0.4"></div>
+      </div>
+      <span class="per1k-val" style="color:var(--bad)">−${{ ca.residual | abs }}</span>
+      <span class="per1k-subtext">spending exceeded OCF (funded by debt/cash drawdown)</span>
+    </div>
+    {% endif %}
+    {% endif %}
+    {% set total_out = (ca.capex or 0) + (ca.acquisitions or 0) + (ca.dividends or 0) + (ca.buybacks or 0) + (ca.debt_repay or 0) %}
+    {% set total_in  = (ca.debt_issued or 0) + (ca.stock_issued or 0) + (ca.divestitures or 0) %}
+    <div class="per1k-note" style="margin-top:8px">
+      Total uses: ${{ total_out }}
+      {% if total_in %} + ${{ total_in }} new loans{% endif %}
+      &nbsp;·&nbsp; OCF covers $1,000
+      {% if ca.residual and ca.residual < 0 %}&nbsp;·&nbsp; gap of ${{ ca.residual | abs }} funded by debt / cash reserves
+      {% elif ca.residual and ca.residual > 0 %}&nbsp;·&nbsp; ${{ ca.residual }} surplus added to cash balance{% endif %}
+      {% if ca.year %}&nbsp;·&nbsp; FY{{ ca.year }}{% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<!-- FINANCIAL FOUNDATION — BALANCE SHEET -->
+{% set bs  = report.ai_step4._balance_sheet  if report.ai_step4 else none %}
+{% set ndt = report.ai_step4._net_debt_trend if report.ai_step4 else none %}
+{% if bs %}
+<section class="card">
+  <h2>Financial foundation — balance sheet</h2>
+  <p class="sub">What does the company own and how is it financed? Both charts are per $1,000 of total assets{% if bs.year %} · FY{{ bs.year }}{% endif %}{% if bs.total_assets_b %} · total ${{ bs.total_assets_b }}B{% endif %}</p>
+
+  <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">What does the company own?</h3>
+  <div class="per1k-grid" style="margin-bottom:18px">
+    {% set asset_rows = [
+      ("Cash & investments",       "Bank accounts, money market funds, short-term securities",  bs.assets.cash,                "#2dd4bf"),
+      ("Receivables",              "Money customers owe but haven't paid yet (e.g. unpaid invoices)", bs.assets.receivables,    "#60a5fa"),
+      ("Inventory",                "Goods ready to sell or raw materials to produce them",       bs.assets.inventory,           "#f59e0b"),
+      ("PP&E (tangible assets)",   "Buildings, factories, equipment, vehicles, land",            bs.assets.ppe,                 "#f97316"),
+      ("Goodwill & intangibles",   "Brand value, patents, customer lists acquired via M&A; disappears in a write-down", bs.assets.goodwill_intangibles, "#a78bfa"),
+      ("Other assets",             "Deferred taxes, prepaid expenses, long-term investments, other", bs.assets.other_assets,   "#64748b"),
+    ] %}
+    {% for label, desc, val, color in asset_rows %}
+      {% if val is not none and val > 0 %}
+      <div class="per1k-row bs-row-with-desc">
+        <div class="per1k-label-col">
+          <span class="per1k-label">{{ label }}</span>
+          <span class="per1k-desc">{{ desc }}</span>
+        </div>
+        <div class="per1k-bar-wrap">
+          <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
+        </div>
+        <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
+      </div>
+      {% endif %}
+    {% endfor %}
+    <div class="per1k-note">Per $1,000 total assets · rows sum to ~$1,000</div>
+  </div>
+
+  <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">How is it financed?</h3>
+  <div class="per1k-grid" style="margin-bottom:18px">
+    {% set fin_rows = [
+      ("Current liabilities",   "Bills due within 12 months: accounts payable, accrued wages, short-term debt", bs.financing.current_liabilities, "#f87171"),
+      ("Long-term debt",        "Bonds and bank loans due after 12 months; the main leverage risk",             bs.financing.long_term_debt,      "#ef4444"),
+      ("Other liabilities",     "Deferred revenue, pension obligations, operating lease liabilities",           bs.financing.other_liabilities,   "#94a3b8"),
+      ("Shareholders' equity",  "Book value: total assets minus all liabilities; what owners actually own",     bs.financing.equity,              "var(--good)"),
+    ] %}
+    {% for label, desc, val, color in fin_rows %}
+      {% if val is not none and val > 0 %}
+      <div class="per1k-row bs-row-with-desc">
+        <div class="per1k-label-col">
+          <span class="per1k-label">{{ label }}</span>
+          <span class="per1k-desc">{{ desc }}</span>
+        </div>
+        <div class="per1k-bar-wrap">
+          <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
+        </div>
+        <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
+      </div>
+      {% endif %}
+    {% endfor %}
+    <div class="per1k-note">Per $1,000 total assets · liabilities + equity = total assets{% if bs.financing.equity is none or bs.financing.equity <= 0 %} · <span style="color:var(--warn)">negative equity (heavy buyback / leverage)</span>{% endif %}</div>
+  </div>
+
+  {% set ft = bs.fortress %}
+  <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">Fortress metrics</h3>
+  <div class="bs-fortress-strip">
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Net debt position</span>
+      <strong class="bs-fortress-val {{ 'great' if ft.net_debt is not none and ft.net_debt < 0 else 'warn' if ft.net_debt is not none and ft.net_debt > 0 else '' }}">{{ ft.net_debt_label or '—' }}</strong>
+    </div>
+    {% if ft.net_debt_ebitda is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Net debt / EBITDA</span>
+      <strong class="bs-fortress-val {{ ft.net_debt_ebitda_quality }}">{{ ft.net_debt_ebitda_label }}</strong>
+    </div>
+    {% endif %}
+    {% if ft.current_ratio is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Current ratio</span>
+      <strong class="bs-fortress-val {{ ft.current_ratio_quality }}">{{ "%.2f"|format(ft.current_ratio) }}×</strong>
+    </div>
+    {% endif %}
+    {% if ft.interest_coverage is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Interest coverage</span>
+      <strong class="bs-fortress-val {{ ft.interest_coverage_quality }}">{{ "%.1f"|format(ft.interest_coverage) }}×</strong>
+    </div>
+    {% endif %}
+    {% if ft.altman_z is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Altman Z-score</span>
+      <strong class="bs-fortress-val {{ ft.altman_z_quality }}">{{ "%.2f"|format(ft.altman_z) }}</strong>
+    </div>
+    {% endif %}
+    {% if ft.piotroski is not none %}
+    <div class="bs-fortress-cell">
+      <span class="bs-fortress-label">Piotroski F-score</span>
+      <strong class="bs-fortress-val {{ ft.piotroski_quality }}">{{ ft.piotroski }}/9</strong>
+    </div>
+    {% endif %}
+  </div>
+  <p class="hint" style="margin-top:4px">ND/EBITDA: ≤0× net cash · ≤1.5× good · ≤3× watch · &gt;3× levered &nbsp;·&nbsp; Altman Z: ≥3.0 safe · ≥1.8 grey zone · &lt;1.8 distress &nbsp;·&nbsp; Piotroski: ≥7 strong · ≥5 ok · &lt;3 weak</p>
+
+  {% if ndt and ndt | length >= 2 %}
+  <h3 style="margin:16px 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">Leverage trend (5Y)</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Year</th><th>Total debt</th><th>Cash</th><th>Net debt</th><th>EBITDA</th><th>ND / EBITDA</th></tr></thead>
+    <tbody>
+    {% for row in ndt %}
+    <tr>
+      <th>{{ row.year }}</th>
+      <td>${{ row.total_debt_b }}B</td>
+      <td>${{ row.cash_b }}B</td>
+      <td class="qval {{ 'great' if row.net_debt_b < 0 else 'warn' if row.net_debt_b > 2 else 'good' }}">
+        {{ '$' ~ (row.net_debt_b | abs) ~ 'B net cash' if row.net_debt_b < 0 else '$' ~ row.net_debt_b ~ 'B' }}
+      </td>
+      <td>{{ '$' ~ row.ebitda_b ~ 'B' if row.ebitda_b is not none else '—' }}</td>
+      <td class="qval {{ row.nd_ebitda_quality }}">{{ row.nd_ebitda ~ '×' if row.nd_ebitda is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<!-- HOW THE BUSINESS MAKES MONEY — INCOME STATEMENT -->
+{% set p1k_top = report.ai_step4._per1000 if report.ai_step4 else none %}
+{% if p1k_top %}
+<section class="card">
+  <h2>How the business makes money</h2>
+  <p class="sub">Per $1,000 of revenue · FY{{ p1k_top.year }} — where each dollar goes before reaching shareholders{% if p1k_top.revenue_b %} · total ${{ p1k_top.revenue_b }}B{% endif %}</p>
+  <div class="per1k-grid">
+    {% set cost_rows_top = [
+      ("Cost of goods / delivery",          p1k_top.cogs,       "var(--bad)"),
+      ("Research & development",            p1k_top.rd,          "#a78bfa"),
+      ("Sales, marketing & admin",          p1k_top.sga,         "var(--warn)"),
+      ("Other costs (interest, D&A, etc.)", p1k_top.other,       "#64748b"),
+      ("Taxes",                             p1k_top.taxes,        "#6b7280"),
+      ("Net profit",                        p1k_top.net_income,  "var(--good)"),
+    ] %}
+    {% for label, val, color in cost_rows_top %}
+      {% if val is not none and val != 0 %}
+      <div class="per1k-row">
+        <span class="per1k-label">{{ label }}</span>
+        <div class="per1k-bar-wrap">
+          <div class="per1k-bar" style="width:{{ (([val, 0] | max) / 10) | round(1) }}%;background:{{ color }}"></div>
+        </div>
+        <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
+      </div>
+      {% endif %}
+    {% endfor %}
+    {% if p1k_top.op_income is not none or p1k_top.fcf is not none %}
+    <div class="per1k-divider"></div>
+    {% endif %}
+    {% if p1k_top.op_income is not none %}
+    <div class="per1k-row per1k-derived">
+      <span class="per1k-label">Operating profit</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ (([p1k_top.op_income, 0] | max) / 10) | round(1) }}%;background:var(--accent);opacity:0.5"></div>
+      </div>
+      <span class="per1k-val" style="color:var(--accent)">${{ p1k_top.op_income }}</span>
+      <span class="per1k-subtext">before interest &amp; tax</span>
+    </div>
+    {% endif %}
+    {% if p1k_top.fcf is not none %}
+    <div class="per1k-row per1k-derived">
+      <span class="per1k-label">Free cash flow</span>
+      <div class="per1k-bar-wrap">
+        <div class="per1k-bar" style="width:{{ (([p1k_top.fcf, 0] | max) / 10) | round(1) }}%;background:#5eead4;opacity:0.5"></div>
+      </div>
+      <span class="per1k-val" style="color:#5eead4">${{ p1k_top.fcf }}</span>
+      <span class="per1k-subtext">net profit adjusted for D&amp;A, SBC and capex</span>
+    </div>
+    {% endif %}
+    <div class="per1k-note">Top rows sum to ~$1,000 · per $1,000 revenue{% if p1k_top.year %} · FY{{ p1k_top.year }}{% endif %}{% if p1k_top.revenue_b %} · total ${{ p1k_top.revenue_b }}B{% endif %}</div>
+  </div>
+</section>
+{% endif %}
 
 <!-- AI EXECUTIVE SUMMARY -->
 <section class="card hero">
@@ -391,69 +715,10 @@
     <strong>{{ fa.verdict }}</strong>
   </div>
 
-  {# Business model plain-English panel #}
+  {# Business model plain-English summary (chart moved to top-of-page section) #}
   {% set biz_text = fa_ai.get('business_model') if fa_ai else "" %}
-  {% set p1k = fa_ai.get('_per1000') if fa_ai else none %}
-  {% if biz_text or p1k %}
-  <div class="biz-model-panel">
-    <div class="biz-model-head">
-      <span class="pane-label">How the business makes money</span>
-    </div>
-    {% if p1k %}
-    <div class="per1k-grid">
-      {# Cost breakdown — these sum to ~$1,000 with net profit #}
-      {% set cost_rows = [
-        ("Cost of goods / delivery",          p1k.cogs,       "var(--bad)"),
-        ("Research & development",            p1k.rd,          "#a78bfa"),
-        ("Sales, marketing & admin",          p1k.sga,         "var(--warn)"),
-        ("Other costs (interest, D&A, etc.)", p1k.other,       "#64748b"),
-        ("Taxes",                             p1k.taxes,        "#6b7280"),
-        ("Net profit",                        p1k.net_income,  "var(--good)"),
-      ] %}
-      {% for label, val, color in cost_rows %}
-        {% if val is not none and val != 0 %}
-        <div class="per1k-row">
-          <span class="per1k-label">{{ label }}</span>
-          <div class="per1k-bar-wrap">
-            <div class="per1k-bar" style="width:{{ (([val, 0] | max) / 10) | round(1) }}%;background:{{ color }}"></div>
-          </div>
-          <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
-        </div>
-        {% endif %}
-      {% endfor %}
-
-      {# Derived metrics — shown below the divider, do NOT sum with costs #}
-      {% if p1k.op_income is not none or p1k.fcf is not none %}
-      <div class="per1k-divider"></div>
-      {% endif %}
-      {% if p1k.op_income is not none %}
-      <div class="per1k-row per1k-derived">
-        <span class="per1k-label">Operating profit</span>
-        <div class="per1k-bar-wrap">
-          <div class="per1k-bar" style="width:{{ (([p1k.op_income, 0] | max) / 10) | round(1) }}%;background:var(--accent);opacity:0.5"></div>
-        </div>
-        <span class="per1k-val" style="color:var(--accent)">${{ p1k.op_income }}</span>
-        <span class="per1k-subtext">before interest &amp; tax</span>
-      </div>
-      {% endif %}
-      {% if p1k.fcf is not none %}
-      <div class="per1k-row per1k-derived">
-        <span class="per1k-label">Free cash flow</span>
-        <div class="per1k-bar-wrap">
-          <div class="per1k-bar" style="width:{{ (([p1k.fcf, 0] | max) / 10) | round(1) }}%;background:#5eead4;opacity:0.5"></div>
-        </div>
-        <span class="per1k-val" style="color:#5eead4">${{ p1k.fcf }}</span>
-        <span class="per1k-subtext">net profit adjusted for D&amp;A, SBC and capex</span>
-      </div>
-      {% endif %}
-
-      <div class="per1k-note">Top rows sum to ~$1,000 · per $1,000 revenue{% if p1k.year %} · FY{{ p1k.year }}{% endif %}{% if p1k.revenue_b %} · total ${{ p1k.revenue_b }}B{% endif %}</div>
-    </div>
-    {% endif %}
-    {% if biz_text %}
-    <p class="biz-model-text">{{ biz_text }}</p>
-    {% endif %}
-  </div>
+  {% if biz_text %}
+  <p class="biz-model-text">{{ biz_text }}</p>
   {% endif %}
 
   <div class="bq-grid">
@@ -604,289 +869,6 @@
     </tbody>
   </table>
   </div>
-</section>
-{% endif %}
-
-<!-- CAPITAL ALLOCATION CHART -->
-{% set ca = report.ai_step4._cap_alloc if report.ai_step4 else none %}
-{% set cg = report.ai_step4._cash_gen   if report.ai_step4 else none %}
-{% if ca %}
-<section class="card">
-  <h2>Capital allocation</h2>
-  <p class="sub">Where does operating cash flow go? Per $1,000 of OCF{% if ca.year %} · FY{{ ca.year }}{% endif %}{% if ca.ocf_b %} · total ${{ ca.ocf_b }}B{% endif %}</p>
-
-  {% if cg %}
-  <div class="cashgen-strip">
-    {% if cg.ocf_b %}
-    <div class="cashgen-cell">
-      <span class="cashgen-label">Operating cash flow</span>
-      <strong class="cashgen-val">{{ cg.ocf_b }}</strong>
-      <span class="cashgen-note">TTM · before capex</span>
-    </div>
-    {% endif %}
-    {% if cg.fcf_b %}
-    <div class="cashgen-cell">
-      <span class="cashgen-label">Free cash flow</span>
-      <strong class="cashgen-val">{{ cg.fcf_b }}</strong>
-      <span class="cashgen-note">TTM · after capex</span>
-    </div>
-    {% endif %}
-    {% if cg.fcf_margin %}
-    <div class="cashgen-cell">
-      <span class="cashgen-label">FCF margin</span>
-      <strong class="cashgen-val {{ cg.fcf_margin_q }}">{{ cg.fcf_margin }}</strong>
-      <span class="cashgen-note">of every $1 revenue</span>
-    </div>
-    {% endif %}
-    {% if cg.fcf_yield %}
-    <div class="cashgen-cell">
-      <span class="cashgen-label">FCF yield</span>
-      <strong class="cashgen-val {{ cg.fcf_yield_q }}">{{ cg.fcf_yield }}</strong>
-      <span class="cashgen-note">FCF ÷ market cap</span>
-    </div>
-    {% endif %}
-    {% if cg.fcf_per_share %}
-    <div class="cashgen-cell">
-      <span class="cashgen-label">FCF / share</span>
-      <strong class="cashgen-val">{{ cg.fcf_per_share }}</strong>
-      <span class="cashgen-note">TTM</span>
-    </div>
-    {% endif %}
-  </div>
-  {% endif %}
-  <div class="capalloc-grid">
-    {# Outflows — uses of cash #}
-    {% set alloc_rows = [
-      ("Reinvestment (capex)",    ca.capex,        "#f97316", "maintaining & growing assets"),
-      ("Acquisitions (M&A)",      ca.acquisitions, "#fbbf24", "net M&A spending"),
-      ("Dividends paid",          ca.dividends,    "#2dd4bf", "income return to shareholders"),
-      ("Share buybacks",          ca.buybacks,     "var(--good)", "capital return to shareholders"),
-      ("Debt repaid",             ca.debt_repay,   "#ef4444", "deleveraging"),
-    ] %}
-    {% for label, val, color, note in alloc_rows %}
-      {% if val is not none and val > 0 %}
-      <div class="per1k-row">
-        <span class="per1k-label">{{ label }}</span>
-        <div class="per1k-bar-wrap">
-          <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
-        </div>
-        <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
-        <span class="per1k-subtext">{{ note }}</span>
-      </div>
-      {% endif %}
-    {% endfor %}
-
-    {# SBC — non-cash dilution note (shown after buybacks for context) #}
-    {% if ca.sbc and ca.sbc > 0 %}
-    <div class="per1k-row per1k-derived" style="margin-top:2px">
-      <span class="per1k-label" style="color:#c084fc">SBC (stock comp dilution)</span>
-      <div class="per1k-bar-wrap">
-        <div class="per1k-bar" style="width:{{ ((ca.sbc / 10) | round(1)) }}%;background:#c084fc;opacity:0.5"></div>
-      </div>
-      <span class="per1k-val" style="color:#c084fc">${{ ca.sbc }}</span>
-      <span class="per1k-subtext">non-cash; reduces net buyback impact (net return = buybacks − SBC)</span>
-    </div>
-    {% endif %}
-
-    {# Inflows — cash sources beyond OCF #}
-    {% if (ca.debt_issued and ca.debt_issued > 0) or (ca.stock_issued and ca.stock_issued > 0) or (ca.divestitures and ca.divestitures > 0) %}
-    <div class="per1k-divider"></div>
-    {% if ca.divestitures and ca.divestitures > 0 %}
-    <div class="per1k-row">
-      <span class="per1k-label" style="color:#fbbf24">+ Asset / business sales</span>
-      <div class="per1k-bar-wrap">
-        <div class="per1k-bar" style="width:{{ ((ca.divestitures / 10) | round(1)) }}%;background:#fbbf24;opacity:0.7"></div>
-      </div>
-      <span class="per1k-val" style="color:#fbbf24">+${{ ca.divestitures }}</span>
-      <span class="per1k-subtext">divestiture proceeds (net acquisitionsNet positive)</span>
-    </div>
-    {% endif %}
-    {% if ca.debt_issued and ca.debt_issued > 0 %}
-    <div class="per1k-row">
-      <span class="per1k-label" style="color:var(--warn)">+ New loans / debt raised</span>
-      <div class="per1k-bar-wrap">
-        <div class="per1k-bar" style="width:{{ ((ca.debt_issued / 10) | round(1)) }}%;background:var(--warn);opacity:0.7"></div>
-      </div>
-      <span class="per1k-val" style="color:var(--warn)">+${{ ca.debt_issued }}</span>
-      <span class="per1k-subtext">new borrowing adds to allocation pool</span>
-    </div>
-    {% endif %}
-    {% if ca.stock_issued and ca.stock_issued > 0 %}
-    <div class="per1k-row">
-      <span class="per1k-label" style="color:#a78bfa">+ New shares issued</span>
-      <div class="per1k-bar-wrap">
-        <div class="per1k-bar" style="width:{{ ((ca.stock_issued / 10) | round(1)) }}%;background:#a78bfa;opacity:0.7"></div>
-      </div>
-      <span class="per1k-val" style="color:#a78bfa">+${{ ca.stock_issued }}</span>
-      <span class="per1k-subtext">options exercised / secondary offering proceeds</span>
-    </div>
-    {% endif %}
-    {% endif %}
-
-    {# Residual #}
-    {% if ca.residual %}
-    {% if ca.residual > 0 %}
-    <div class="per1k-row per1k-derived">
-      <span class="per1k-label">Cash accumulated</span>
-      <div class="per1k-bar-wrap">
-        <div class="per1k-bar" style="width:{{ ((ca.residual | abs / 10) | round(1)) }}%;background:#94a3b8;opacity:0.5"></div>
-      </div>
-      <span class="per1k-val" style="color:#94a3b8">${{ ca.residual }}</span>
-      <span class="per1k-subtext">balance sheet buffer / other</span>
-    </div>
-    {% else %}
-    <div class="per1k-row per1k-derived">
-      <span class="per1k-label" style="color:var(--mute)">Deficit / other</span>
-      <div class="per1k-bar-wrap">
-        <div class="per1k-bar" style="width:{{ ((ca.residual | abs / 10) | round(1)) }}%;background:var(--bad);opacity:0.4"></div>
-      </div>
-      <span class="per1k-val" style="color:var(--bad)">−${{ ca.residual | abs }}</span>
-      <span class="per1k-subtext">spending exceeded OCF (funded by debt/cash drawdown)</span>
-    </div>
-    {% endif %}
-    {% endif %}
-
-    {# Footer: make the arithmetic explicit #}
-    {% set total_out = (ca.capex or 0) + (ca.acquisitions or 0) + (ca.dividends or 0) + (ca.buybacks or 0) + (ca.debt_repay or 0) %}
-    {% set total_in  = (ca.debt_issued or 0) + (ca.stock_issued or 0) + (ca.divestitures or 0) %}
-    <div class="per1k-note" style="margin-top:8px">
-      Total uses: ${{ total_out }}
-      {% if total_in %} + ${{ total_in }} new loans{% endif %}
-      &nbsp;·&nbsp;
-      OCF covers $1,000
-      {% if ca.residual and ca.residual < 0 %}
-        &nbsp;·&nbsp; gap of ${{ ca.residual | abs }} funded by debt / cash reserves
-      {% elif ca.residual and ca.residual > 0 %}
-        &nbsp;·&nbsp; ${{ ca.residual }} surplus added to cash balance
-      {% endif %}
-      {% if ca.year %}&nbsp;·&nbsp; FY{{ ca.year }}{% endif %}
-    </div>
-  </div>
-</section>
-{% endif %}
-
-<!-- FINANCIAL FOUNDATION — BALANCE SHEET -->
-{% set bs  = report.ai_step4._balance_sheet  if report.ai_step4 else none %}
-{% set ndt = report.ai_step4._net_debt_trend if report.ai_step4 else none %}
-{% if bs %}
-<section class="card">
-  <h2>Financial foundation — balance sheet</h2>
-  <p class="sub">What does the company own and how is it financed? Both charts are per $1,000 of total assets{% if bs.year %} · FY{{ bs.year }}{% endif %}{% if bs.total_assets_b %} · total ${{ bs.total_assets_b }}B{% endif %}</p>
-
-  <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">What does the company own?</h3>
-  <div class="per1k-grid" style="margin-bottom:18px">
-    {% set asset_rows = [
-      ("Cash & investments",       "Bank accounts, money market funds, short-term securities",  bs.assets.cash,                "#2dd4bf"),
-      ("Receivables",              "Money customers owe but haven't paid yet (e.g. unpaid invoices)", bs.assets.receivables,    "#60a5fa"),
-      ("Inventory",                "Goods ready to sell or raw materials to produce them",       bs.assets.inventory,           "#f59e0b"),
-      ("PP&E (tangible assets)",   "Buildings, factories, equipment, vehicles, land",            bs.assets.ppe,                 "#f97316"),
-      ("Goodwill & intangibles",   "Brand value, patents, customer lists acquired via M&A; disappears in a write-down", bs.assets.goodwill_intangibles, "#a78bfa"),
-      ("Other assets",             "Deferred taxes, prepaid expenses, long-term investments, other", bs.assets.other_assets,   "#64748b"),
-    ] %}
-    {% for label, desc, val, color in asset_rows %}
-      {% if val is not none and val > 0 %}
-      <div class="per1k-row bs-row-with-desc">
-        <div class="per1k-label-col">
-          <span class="per1k-label">{{ label }}</span>
-          <span class="per1k-desc">{{ desc }}</span>
-        </div>
-        <div class="per1k-bar-wrap">
-          <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
-        </div>
-        <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
-      </div>
-      {% endif %}
-    {% endfor %}
-    <div class="per1k-note">Per $1,000 total assets · rows sum to ~$1,000</div>
-  </div>
-
-  <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">How is it financed?</h3>
-  <div class="per1k-grid" style="margin-bottom:18px">
-    {% set fin_rows = [
-      ("Current liabilities",   "Bills due within 12 months: accounts payable, accrued wages, short-term debt", bs.financing.current_liabilities, "#f87171"),
-      ("Long-term debt",        "Bonds and bank loans due after 12 months; the main leverage risk",             bs.financing.long_term_debt,      "#ef4444"),
-      ("Other liabilities",     "Deferred revenue, pension obligations, operating lease liabilities",           bs.financing.other_liabilities,   "#94a3b8"),
-      ("Shareholders' equity",  "Book value: total assets minus all liabilities; what owners actually own",     bs.financing.equity,              "var(--good)"),
-    ] %}
-    {% for label, desc, val, color in fin_rows %}
-      {% if val is not none and val > 0 %}
-      <div class="per1k-row bs-row-with-desc">
-        <div class="per1k-label-col">
-          <span class="per1k-label">{{ label }}</span>
-          <span class="per1k-desc">{{ desc }}</span>
-        </div>
-        <div class="per1k-bar-wrap">
-          <div class="per1k-bar" style="width:{{ ((val / 10) | round(1)) }}%;background:{{ color }}"></div>
-        </div>
-        <span class="per1k-val" style="color:{{ color }}">${{ val }}</span>
-      </div>
-      {% endif %}
-    {% endfor %}
-    <div class="per1k-note">Per $1,000 total assets · liabilities + equity = total assets{% if bs.financing.equity is none or bs.financing.equity <= 0 %} · <span style="color:var(--warn)">negative equity (heavy buyback / leverage)</span>{% endif %}</div>
-  </div>
-
-  {% set ft = bs.fortress %}
-  <h3 style="margin:0 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">Fortress metrics</h3>
-  <div class="bs-fortress-strip">
-    <div class="bs-fortress-cell">
-      <span class="bs-fortress-label">Net debt position</span>
-      <strong class="bs-fortress-val {{ 'great' if ft.net_debt is not none and ft.net_debt < 0 else 'warn' if ft.net_debt is not none and ft.net_debt > 0 else '' }}">{{ ft.net_debt_label or '—' }}</strong>
-    </div>
-    {% if ft.net_debt_ebitda is not none %}
-    <div class="bs-fortress-cell">
-      <span class="bs-fortress-label">Net debt / EBITDA</span>
-      <strong class="bs-fortress-val {{ ft.net_debt_ebitda_quality }}">{{ ft.net_debt_ebitda_label }}</strong>
-    </div>
-    {% endif %}
-    {% if ft.current_ratio is not none %}
-    <div class="bs-fortress-cell">
-      <span class="bs-fortress-label">Current ratio</span>
-      <strong class="bs-fortress-val {{ ft.current_ratio_quality }}">{{ "%.2f"|format(ft.current_ratio) }}×</strong>
-    </div>
-    {% endif %}
-    {% if ft.interest_coverage is not none %}
-    <div class="bs-fortress-cell">
-      <span class="bs-fortress-label">Interest coverage</span>
-      <strong class="bs-fortress-val {{ ft.interest_coverage_quality }}">{{ "%.1f"|format(ft.interest_coverage) }}×</strong>
-    </div>
-    {% endif %}
-    {% if ft.altman_z is not none %}
-    <div class="bs-fortress-cell">
-      <span class="bs-fortress-label">Altman Z-score</span>
-      <strong class="bs-fortress-val {{ ft.altman_z_quality }}">{{ "%.2f"|format(ft.altman_z) }}</strong>
-    </div>
-    {% endif %}
-    {% if ft.piotroski is not none %}
-    <div class="bs-fortress-cell">
-      <span class="bs-fortress-label">Piotroski F-score</span>
-      <strong class="bs-fortress-val {{ ft.piotroski_quality }}">{{ ft.piotroski }}/9</strong>
-    </div>
-    {% endif %}
-  </div>
-  <p class="hint" style="margin-top:4px">ND/EBITDA: ≤0× net cash · ≤1.5× good · ≤3× watch · &gt;3× levered &nbsp;·&nbsp; Altman Z: ≥3.0 safe · ≥1.8 grey zone · &lt;1.8 distress &nbsp;·&nbsp; Piotroski: ≥7 strong · ≥5 ok · &lt;3 weak</p>
-
-  {% if ndt and ndt | length >= 2 %}
-  <h3 style="margin:16px 0 8px;font-size:0.85rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em">Leverage trend (5Y)</h3>
-  <div class="tablewrap">
-  <table>
-    <thead><tr><th>Year</th><th>Total debt</th><th>Cash</th><th>Net debt</th><th>EBITDA</th><th>ND / EBITDA</th></tr></thead>
-    <tbody>
-    {% for row in ndt %}
-    <tr>
-      <th>{{ row.year }}</th>
-      <td>${{ row.total_debt_b }}B</td>
-      <td>${{ row.cash_b }}B</td>
-      <td class="qval {{ 'great' if row.net_debt_b < 0 else 'warn' if row.net_debt_b > 2 else 'good' }}">
-        {{ '$' ~ (row.net_debt_b | abs) ~ 'B net cash' if row.net_debt_b < 0 else '$' ~ row.net_debt_b ~ 'B' }}
-      </td>
-      <td>{{ '$' ~ row.ebitda_b ~ 'B' if row.ebitda_b is not none else '—' }}</td>
-      <td class="qval {{ row.nd_ebitda_quality }}">{{ row.nd_ebitda ~ '×' if row.nd_ebitda is not none else '—' }}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  {% endif %}
 </section>
 {% endif %}
 
