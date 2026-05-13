@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ report.ticker }} — FMP Analyzer</title>
-<link rel="stylesheet" href="/static/style.css?v=16">
+<link rel="stylesheet" href="/static/style.css?v=17">
 </head>
 <body>
 {% set f = report.fundamentals %}
@@ -394,6 +394,88 @@
     {% endif %}
     <div class="per1k-note">Top rows sum to ~$1,000 · per $1,000 revenue{% if p1k_top.year %} · FY{{ p1k_top.year }}{% endif %}{% if p1k_top.revenue_b %} · total ${{ p1k_top.revenue_b }}B{% endif %}</div>
   </div>
+</section>
+{% endif %}
+
+<!-- ROIC VS WACC — RETURN ON INVESTED CAPITAL -->
+{% set rw = report.ai_step4._roic_wacc if report.ai_step4 else none %}
+{% if rw %}
+<section class="card">
+  <h2>Return on invested capital vs cost of capital</h2>
+  <p class="sub">ROIC = profit the business earns on every dollar invested in it. WACC = what investors require as a return. When ROIC &gt; WACC the company creates value; when ROIC &lt; WACC it destroys it.</p>
+
+  {# Summary strip #}
+  <div class="cashgen-strip" style="margin-bottom:18px">
+    {% if rw.current_roic is not none %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">Current ROIC</span>
+      <strong class="cashgen-val {{ 'great' if rw.current_roic >= 20 else 'good' if rw.current_roic >= 12 else 'warn' if rw.current_roic >= 8 else 'bad' }}">{{ rw.current_roic }}%</strong>
+      <span class="cashgen-note">TTM / most recent annual</span>
+    </div>
+    {% endif %}
+    {% if rw.wacc_pct is not none %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">WACC (cost of capital)</span>
+      <strong class="cashgen-val">{{ rw.wacc_pct }}%</strong>
+      <span class="cashgen-note">sector-based estimate</span>
+    </div>
+    {% endif %}
+    {% if rw.current_spread is not none %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">Spread (ROIC − WACC)</span>
+      <strong class="cashgen-val {{ rw.current_spread_q }}">{{ '+' if rw.current_spread > 0 else '' }}{{ rw.current_spread }}pp</strong>
+      <span class="cashgen-note">{{ 'value creation' if rw.current_spread >= 0 else 'value destruction' }}</span>
+    </div>
+    {% endif %}
+    {% if rw.avg_roic_5y is not none %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">5Y avg ROIC</span>
+      <strong class="cashgen-val {{ 'great' if rw.avg_roic_5y >= 20 else 'good' if rw.avg_roic_5y >= 12 else 'warn' if rw.avg_roic_5y >= 8 else 'bad' }}">{{ rw.avg_roic_5y }}%</strong>
+      <span class="cashgen-note">consistency signal</span>
+    </div>
+    {% endif %}
+    {% if rw.avg_spread_5y is not none %}
+    <div class="cashgen-cell">
+      <span class="cashgen-label">5Y avg spread</span>
+      <strong class="cashgen-val {{ 'great' if rw.avg_spread_5y >= 10 else 'good' if rw.avg_spread_5y >= 5 else 'warn' if rw.avg_spread_5y >= 0 else 'bad' }}">{{ '+' if rw.avg_spread_5y > 0 else '' }}{{ rw.avg_spread_5y }}pp</strong>
+      <span class="cashgen-note">avg value creation</span>
+    </div>
+    {% endif %}
+  </div>
+
+  {# Year-by-year bar chart #}
+  {% set roic_scale = 50 %}  {# bars scale: 50% ROIC = 100% bar width #}
+  <div class="roic-grid">
+    {% if rw.wacc_pct is not none %}
+    <div class="roic-row roic-header">
+      <span class="roic-year"></span>
+      <div class="roic-bar-wrap">
+        <div class="roic-wacc-line" style="left:{{ [rw.wacc_pct / roic_scale * 100, 100] | min | round(1) }}%">
+          <span class="roic-wacc-label">WACC {{ rw.wacc_pct }}%</span>
+        </div>
+      </div>
+      <span class="roic-pct-hdr">ROIC</span>
+      <span class="roic-spread-hdr">Spread</span>
+    </div>
+    {% endif %}
+    {% for row in rw.rows %}
+    <div class="roic-row">
+      <span class="roic-year">{{ row.year }}</span>
+      <div class="roic-bar-wrap">
+        {% set bar_w = [row.roic / roic_scale * 100, 100] | min | round(1) %}
+        <div class="roic-bar {{ row.roic_q }}" style="width:{{ bar_w }}%"></div>
+        {% if rw.wacc_pct is not none %}
+        <div class="roic-wacc-line" style="left:{{ [rw.wacc_pct / roic_scale * 100, 100] | min | round(1) }}%"></div>
+        {% endif %}
+      </div>
+      <span class="roic-pct qval {{ row.roic_q }}">{{ row.roic }}%</span>
+      <span class="roic-spread qval {{ row.spread_q }}">
+        {% if row.spread is not none %}{{ '+' if row.spread > 0 else '' }}{{ row.spread }}pp{% else %}—{% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="hint" style="margin-top:8px">ROIC bands: <span class="qval great" style="padding:1px 5px;border-radius:3px">≥20%</span> <span class="qval good" style="padding:1px 5px;border-radius:3px">≥12%</span> <span class="qval warn" style="padding:1px 5px;border-radius:3px">≥8%</span> <span class="qval bad" style="padding:1px 5px;border-radius:3px">&lt;8%</span> · Spread = ROIC minus WACC · WACC is a sector-based estimate, not company-specific</p>
 </section>
 {% endif %}
 

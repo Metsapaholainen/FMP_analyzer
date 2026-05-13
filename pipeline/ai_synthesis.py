@@ -968,6 +968,98 @@ def _build_cash_gen(fundamentals: dict | None) -> dict | None:
     }
 
 
+def _build_roic_wacc_trend(raw: dict, fundamentals: dict | None, ceo: dict | None) -> dict | None:
+    """ROIC vs WACC year-by-year: shows whether the business creates value above its cost of capital."""
+    income_a = raw.get("income_annual") or []
+    bal_a    = raw.get("balance_annual") or []
+    if not income_a:
+        return None
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    # WACC from CEO module (sector-based estimate)
+    wacc_dec = (ceo or {}).get("wacc_used")
+    wacc_pct = round(wacc_dec * 100, 1) if wacc_dec is not None else None
+
+    # Current ROIC from fundamentals metrics band (TTM-weighted)
+    roic_current = None
+    if fundamentals:
+        roic_band = (fundamentals.get("metrics") or {}).get("roic")
+        if roic_band and roic_band.get("current") is not None:
+            roic_current = round(float(roic_band["current"]) * 100, 1)
+
+    bal_by_year = {
+        str(b.get("calendarYear") or (b.get("date") or "")[:4]): b
+        for b in bal_a if b.get("calendarYear") or b.get("date")
+    }
+
+    rows = []
+    for inc in income_a[:8]:
+        year = str(inc.get("calendarYear") or (inc.get("date") or "")[:4] or "")
+        if not year:
+            continue
+        bal = bal_by_year.get(year, {})
+
+        # ROIC = NOPAT / Invested Capital
+        op_inc  = _s(inc.get("operatingIncome"))
+        pretax  = _s(inc.get("incomeBeforeTax") or inc.get("pretaxIncome"))
+        tax_exp = _s(inc.get("incomeTaxExpense"))
+        roic = None
+        if op_inc is not None and bal:
+            tax_rate = 0.21
+            if pretax and pretax != 0 and tax_exp is not None:
+                tax_rate = max(0.0, min(0.40, tax_exp / pretax))
+            nopat = op_inc * (1 - tax_rate)
+            eq   = _s(bal.get("totalStockholdersEquity") or bal.get("totalEquity"))
+            debt = _s(bal.get("totalDebt") or bal.get("longTermDebt"))
+            cash = _s(bal.get("cashAndCashEquivalents") or bal.get("cashAndShortTermInvestments"))
+            if eq is not None:
+                ic = (eq or 0) + (debt or 0) - (cash or 0)
+                if ic > 0:
+                    roic = round(nopat / ic * 100, 1)
+
+        if roic is None:
+            continue
+
+        spread = round(roic - wacc_pct, 1) if wacc_pct is not None else None
+        roic_q   = "great" if roic >= 20 else "good" if roic >= 12 else "warn" if roic >= 8 else "bad"
+        spread_q = ("great" if spread >= 10 else "good" if spread >= 5 else "warn" if spread >= 0 else "bad") if spread is not None else roic_q
+
+        rows.append({
+            "year": year, "roic": roic, "wacc": wacc_pct,
+            "spread": spread, "roic_q": roic_q, "spread_q": spread_q,
+        })
+
+    if not rows:
+        return None
+    rows.sort(key=lambda r: r["year"], reverse=True)
+
+    # Summary aggregates (most recent 5Y)
+    roic_vals   = [r["roic"]   for r in rows[:5] if r["roic"]   is not None]
+    spread_vals = [r["spread"] for r in rows[:5] if r["spread"] is not None]
+    avg_roic_5y   = round(sum(roic_vals)   / len(roic_vals),   1) if roic_vals   else None
+    avg_spread_5y = round(sum(spread_vals) / len(spread_vals), 1) if spread_vals else None
+
+    cur_roic   = roic_current if roic_current is not None else (rows[0]["roic"] if rows else None)
+    cur_spread = round(cur_roic - wacc_pct, 1) if (cur_roic is not None and wacc_pct is not None) else None
+    cur_spread_q = ("great" if cur_spread >= 10 else "good" if cur_spread >= 5 else "warn" if cur_spread >= 0 else "bad") if cur_spread is not None else None
+
+    return {
+        "rows":           rows,
+        "wacc_pct":       wacc_pct,
+        "current_roic":   cur_roic,
+        "current_spread": cur_spread,
+        "current_spread_q": cur_spread_q,
+        "avg_roic_5y":    avg_roic_5y,
+        "avg_spread_5y":  avg_spread_5y,
+    }
+
+
 def _extract_10k_risks(raw: dict) -> list[dict] | None:
     """Use Haiku to extract the 5 most material risks from the raw 10-K risk text.
 
@@ -1011,7 +1103,8 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
                      raw: dict | None = None,
                      competition: dict | None = None,
                      red_flags: list | None = None,
-                     fundamentals: dict | None = None) -> dict:
+                     fundamentals: dict | None = None,
+                     ceo: dict | None = None) -> dict:
     """Focused Haiku call writing specific analyst commentary for each pillar.
     Receives full context (segments, news, peers, description) so it can name
     actual products, acquisitions, and competitor comparisons."""
@@ -1242,9 +1335,10 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     result["_margin_trend"]     = _build_margin_trend(raw)                      if raw else None
     result["_earnings_quality"] = _build_earnings_quality(raw)                  if raw else None
     result["_growth_quality"]   = _build_growth_quality(raw)                    if raw else None
-    result["_balance_sheet"]    = _build_balance_sheet_viz(raw, fundamentals)   if raw else None
-    result["_net_debt_trend"]   = _build_net_debt_trend(raw, fundamentals)      if raw else None
-    result["_10k_risks"]        = _extract_10k_risks(raw)                       if raw else None
+    result["_balance_sheet"]    = _build_balance_sheet_viz(raw, fundamentals)          if raw else None
+    result["_net_debt_trend"]   = _build_net_debt_trend(raw, fundamentals)             if raw else None
+    result["_roic_wacc"]        = _build_roic_wacc_trend(raw, fundamentals, ceo)      if raw else None
+    result["_10k_risks"]        = _extract_10k_risks(raw)                              if raw else None
     return result
 
 

@@ -621,4 +621,68 @@ button:hover { filter: brightness(1.05); }
 .risk10k-operational  .risk10k-cat { color: #a78bfa; }
 .risk10k-macro        .risk10k-cat { color: #60a5fa; }
 
+/* ---- ROIC vs WACC bar chart ---- */
+.roic-grid { display: flex; flex-direction: column; gap: 5px; }
+.roic-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 58px 64px;
+  align-items: center;
+  gap: 8px;
+}
+.roic-header { margin-bottom: 2px; }
+.roic-year { font-size: 0.8rem; color: var(--mute); font-weight: 600; }
+.roic-bar-wrap {
+  position: relative;
+  height: 22px;
+  background: var(--card-2);
+  border-radius: 4px;
+  overflow: visible;
+}
+.roic-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.roic-bar.great { background: #4ade80; opacity: 0.75; }
+.roic-bar.good  { background: #86efac; opacity: 0.65; }
+.roic-bar.warn  { background: var(--warn); opacity: 0.60; }
+.roic-bar.bad   { background: var(--bad); opacity: 0.55; }
+.roic-wacc-line {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--mute);
+  border-radius: 1px;
+  z-index: 2;
+}
+.roic-wacc-label {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 0.68rem;
+  color: var(--mute);
+  padding-bottom: 2px;
+  pointer-events: none;
+}
+.roic-pct {
+  font-weight: 700;
+  font-size: 0.88rem;
+  text-align: right;
+}
+.roic-pct-hdr, .roic-spread-hdr {
+  font-size: 0.68rem;
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: right;
+}
+.roic-spread {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-align: right;
+}
+
 footer { margin-top: 30px; }
