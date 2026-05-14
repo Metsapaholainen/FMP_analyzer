@@ -69,6 +69,190 @@ def _dcf(fcf_base: float, growth: float, wacc: float, terminal_g: float = 0.025,
     return pv
 
 
+_SCENARIO_DEFS = [
+    {
+        "tag": "ultra-bull", "label": "Ultra bull", "name": "Best case",
+        "wacc_low_delta": -0.020, "wacc_high_delta": -0.015,
+        "tg_low_delta":   +0.015, "tg_high_delta":   +0.020,
+        "wacc_desc": (
+            "Business treated as near-monopoly — compressed risk premium, near-zero churn, "
+            "pricing power fully validated. Beta compressed by recurring-revenue predictability."
+        ),
+        "tg_desc": (
+            "Cash flows grow well above long-run nominal GDP, sustained by structural tailwinds "
+            "(AI adoption, network effects, platform lock-in, global market expansion)."
+        ),
+    },
+    {
+        "tag": "bull", "label": "Bull", "name": "Optimistic case",
+        "wacc_low_delta": -0.010, "wacc_high_delta": -0.005,
+        "tg_low_delta":   +0.005, "tg_high_delta":   +0.010,
+        "wacc_desc": (
+            "High-quality compounder with proven pricing power. Competition contained; "
+            "recurring revenue compresses beta; net debt minimal."
+        ),
+        "tg_desc": (
+            "FCF grows modestly above US nominal GDP long run (~3%). "
+            "Incremental value from new products / markets not yet in the base numbers."
+        ),
+    },
+    {
+        "tag": "base", "label": "Base ← your model", "name": "Realistic case",
+        "wacc_low_delta": 0.0, "wacc_high_delta": 0.0,
+        "tg_low_delta":   0.0, "tg_high_delta":   0.0,
+        "wacc_desc": (
+            "CAPM-derived WACC using historical beta and sector/country risk-free rate. "
+            "Accounts for competitive uncertainty as a modest risk premium."
+        ),
+        "tg_desc": (
+            "Roughly in line with long-run nominal GDP. Conservative but not pessimistic "
+            "for a business with switching costs and recurring revenue."
+        ),
+    },
+    {
+        "tag": "bear", "label": "Bear", "name": "Pessimistic case",
+        "wacc_low_delta": +0.015, "wacc_high_delta": +0.020,
+        "tg_low_delta":   -0.010, "tg_high_delta":   -0.005,
+        "wacc_desc": (
+            "Competition takes meaningful market share. Revenue growth decelerates to low "
+            "single digits. Higher risk premium warranted as forward visibility reduces."
+        ),
+        "tg_desc": (
+            "Business matures into a slow-growth cash cow. FCF growth roughly tracks "
+            "inflation only. Adjacent segments fail to offset core-business saturation."
+        ),
+    },
+    {
+        "tag": "ultra-bear", "label": "Ultra bear", "name": "Worst case",
+        "wacc_low_delta": +0.025, "wacc_high_delta": +0.030,
+        "tg_low_delta":   -0.020, "tg_high_delta":   -0.015,
+        "wacc_desc": (
+            "Structural disruption — new technology or regulation eliminates pricing power. "
+            "Business treated as cyclical with significant moat erosion."
+        ),
+        "tg_desc": (
+            "FCF growth barely above zero in real terms. Business in harvest mode — "
+            "milking existing customers while losing new ones to cheaper alternatives."
+        ),
+    },
+]
+
+TG_FLOOR = 0.005   # 0.5% minimum terminal growth
+TG_CAP   = 0.055   # 5.5% maximum terminal growth (above long-run nominal GDP)
+WACC_FLOOR = 0.05
+WACC_CAP   = 0.14
+
+
+def _fmt_upside(u: float) -> str:
+    """Format upside/downside for display (+46%, -17%, flat)."""
+    if abs(u) < 0.015:
+        return "flat"
+    return f"{u:+.0%}"
+
+
+def _build_scenarios(base_dcf: dict, snap: dict) -> list[dict] | None:
+    """5-scenario DCF sensitivity around the base model assumptions."""
+    fcf_base = _safe(base_dcf.get("fcf_base_used"))
+    base_wacc = _safe(base_dcf.get("wacc"))
+    base_g = _safe(base_dcf.get("growth_assumed"))
+    base_tg = _safe(base_dcf.get("terminal_growth"))
+    price = _safe(base_dcf.get("current_price"))
+
+    if not all((fcf_base, base_wacc, base_g is not None, base_tg, price)):
+        return None
+
+    shares = _safe(snap.get("shares_outstanding"))
+    total_debt = _safe(snap.get("total_debt")) or 0.0
+    cash = _safe(snap.get("cash_and_equivalents")) or 0.0
+
+    if not shares or shares <= 0:
+        return None
+
+    def iv_at(wacc_d: float, tg_d: float) -> float | None:
+        w = max(WACC_FLOOR, min(WACC_CAP, base_wacc + wacc_d))
+        tg = max(TG_FLOOR, min(TG_CAP, base_tg + tg_d))
+        if w <= tg:
+            return None
+        eq = _dcf(fcf_base, base_g, w, tg) + cash - total_debt
+        iv = eq / shares
+        return round(iv, 2) if iv > 0 else None
+
+    def wacc_pct(delta: float) -> float:
+        return max(WACC_FLOOR, min(WACC_CAP, base_wacc + delta)) * 100
+
+    def tg_pct(delta: float) -> float:
+        return max(TG_FLOOR, min(TG_CAP, base_tg + delta)) * 100
+
+    scenarios = []
+    for sd in _SCENARIO_DEFS:
+        is_base = sd["tag"] == "base"
+
+        # Optimistic corner (lowest WACC, highest terminal_g)
+        iv_opt = iv_at(sd["wacc_low_delta"], sd["tg_high_delta"])
+        # Pessimistic corner (highest WACC, lowest terminal_g)
+        iv_pes = iv_at(sd["wacc_high_delta"], sd["tg_low_delta"])
+
+        # WACC display
+        w_lo, w_hi = wacc_pct(sd["wacc_low_delta"]), wacc_pct(sd["wacc_high_delta"])
+        if abs(w_lo - w_hi) < 0.05:
+            wacc_display = f"{w_lo:.1f}%"
+        else:
+            # Show low-to-high (for bull: lo < hi means lower WACC end first)
+            a, b = min(w_lo, w_hi), max(w_lo, w_hi)
+            wacc_display = f"{a:.1f}–{b:.1f}%"
+
+        # Terminal-g display
+        tg_lo, tg_hi = tg_pct(sd["tg_low_delta"]), tg_pct(sd["tg_high_delta"])
+        if abs(tg_lo - tg_hi) < 0.05:
+            tg_display = f"{tg_lo:.1f}%"
+        else:
+            a, b = min(tg_lo, tg_hi), max(tg_lo, tg_hi)
+            tg_display = f"{a:.1f}–{b:.1f}%"
+
+        # IV and upside display
+        if is_base:
+            iv_val = iv_opt  # single point for base
+            iv_display = f"${iv_val:,.0f}" if iv_val else "N/A"
+            if iv_val and price:
+                up = (iv_val - price) / price
+                upside_display = f"{_fmt_upside(up)} vs current"
+            else:
+                upside_display = ""
+        else:
+            iv_lo = min(x for x in [iv_opt, iv_pes] if x is not None) if any([iv_opt, iv_pes]) else None
+            iv_hi = max(x for x in [iv_opt, iv_pes] if x is not None) if any([iv_opt, iv_pes]) else None
+            if iv_lo is not None and iv_hi is not None:
+                if abs(iv_hi - iv_lo) < 5:
+                    iv_display = f"${iv_lo:,.0f}"
+                else:
+                    iv_display = f"${iv_lo:,.0f}–{iv_hi:,.0f}"
+                up_lo = (iv_lo - price) / price
+                up_hi = (iv_hi - price) / price
+                upside_display = f"{_fmt_upside(up_lo)} to {_fmt_upside(up_hi)}"
+            elif iv_hi:
+                iv_display = f"${iv_hi:,.0f}"
+                up = (iv_hi - price) / price
+                upside_display = f"{_fmt_upside(up)} vs current"
+            else:
+                iv_display = "negative equity"
+                upside_display = ""
+
+        scenarios.append({
+            "tag": sd["tag"],
+            "label": sd["label"],
+            "name": sd["name"],
+            "wacc_display": wacc_display,
+            "tg_display": tg_display,
+            "wacc_desc": sd["wacc_desc"],
+            "tg_desc": sd["tg_desc"],
+            "iv_display": iv_display,
+            "upside_display": upside_display,
+            "is_base": is_base,
+        })
+
+    return scenarios
+
+
 def build_valuation(raw: dict, fundamentals: dict) -> dict:
     snap = fundamentals["snapshot"]
     metrics = fundamentals["metrics"]
@@ -116,6 +300,9 @@ def build_valuation(raw: dict, fundamentals: dict) -> dict:
         out["cash_return"] = None
 
     # DCF (skip for financials/REITs)
+    # shares fallback: if profile didn't give us sharesOutstanding, derive from market_cap/price
+    if not shares and market_cap and price and price > 0:
+        shares = market_cap / price
     if not out["skip_dcf"] and shares and price:
         cf_a = listify(raw.get("cashflow_annual"))
 
@@ -162,8 +349,15 @@ def build_valuation(raw: dict, fundamentals: dict) -> dict:
             equity_value = _dcf(fcf_base, g, wacc) + cash - total_debt
             iv_per_share = equity_value / shares if shares > 0 else None
 
-            if iv_per_share and iv_per_share > 0:
-                discount = (iv_per_share - price) / iv_per_share
+            if iv_per_share is not None:
+                if iv_per_share > 0:
+                    discount = (iv_per_share - price) / iv_per_share
+                    debt_dominated = False
+                else:
+                    # Equity bridge is negative: net debt exceeds the DCF-derived going-concern
+                    # value. Still surface the result so the user can see the debt burden.
+                    discount = -1.0   # sentinel: price > IV in every scenario
+                    debt_dominated = True
                 out["dcf"] = {
                     "intrinsic_value_per_share": round(iv_per_share, 2),
                     "current_price": round(price, 2),
@@ -173,6 +367,7 @@ def build_valuation(raw: dict, fundamentals: dict) -> dict:
                     "growth_assumed": round(g, 4),
                     "wacc": round(wacc, 4),
                     "terminal_growth": 0.025,
+                    "debt_dominated": debt_dominated,
                     "method": "Two-stage DCF: 10Y explicit fade to terminal, Gordon-growth terminal",
                 }
             else:
@@ -181,6 +376,12 @@ def build_valuation(raw: dict, fundamentals: dict) -> dict:
             out["dcf"] = None
     else:
         out["dcf"] = None
+
+    # 5-scenario sensitivity grid (Ultra bull / Bull / Base / Bear / Ultra bear)
+    if out.get("dcf") and not out["skip_dcf"]:
+        out["scenarios"] = _build_scenarios(out["dcf"], snap)
+    else:
+        out["scenarios"] = None
 
     # FMP's own DCF for comparison
     fmp_dcf = first(raw.get("dcf"))
@@ -227,15 +428,19 @@ def _verdict(val: dict, metrics: dict) -> str:
 
     dcf = val.get("dcf")
     if dcf and dcf.get("margin_of_safety") is not None:
-        mos = dcf["margin_of_safety"]
-        if mos >= 0.30:
-            signals_pos += 2
-        elif mos >= 0.10:
-            signals_pos += 1
-        elif mos <= -0.30:
+        if dcf.get("debt_dominated"):
+            # Equity bridge is negative — count as strong negative signal regardless of MoS sentinel
             signals_neg += 2
-        elif mos <= -0.10:
-            signals_neg += 1
+        else:
+            mos = dcf["margin_of_safety"]
+            if mos >= 0.30:
+                signals_pos += 2
+            elif mos >= 0.10:
+                signals_pos += 1
+            elif mos <= -0.30:
+                signals_neg += 2
+            elif mos <= -0.10:
+                signals_neg += 1
 
     cr = val.get("cash_return")
     if cr and cr.get("value") is not None:

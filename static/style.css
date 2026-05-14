@@ -343,35 +343,144 @@ button:hover { filter: brightness(1.05); }
   padding: 12px 16px;
   margin-bottom: 16px;
 }
+/* ── Business Quality Pillar Cards ───────────────────────── */
 .bq-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 12px;
+  gap: 14px;
 }
-@media (min-width: 600px) {
-  .bq-grid { grid-template-columns: 1fr 1fr; }
-}
-@media (min-width: 1100px) {
-  .bq-grid { grid-template-columns: repeat(3, 1fr); }
-}
-@media (min-width: 1500px) {
-  .bq-grid { grid-template-columns: repeat(5, 1fr); }
-}
+@media (min-width: 600px)  { .bq-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1100px) { .bq-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 1500px) { .bq-grid { grid-template-columns: repeat(5, 1fr); } }
+
 .bq-pillar {
   background: var(--card-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-}
-.bq-pillar-head {
+  border-radius: 12px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  margin-bottom: 10px;
-  padding-bottom: 10px;
+  /* Left accent strip per quality level */
+  border-left-width: 4px;
+  border-left-style: solid;
+}
+.bq-pillar.great { border-left-color: #4ade80; }
+.bq-pillar.good  { border-left-color: #86efac; }
+.bq-pillar.warn  { border-left-color: #f5b942; }
+.bq-pillar.bad   { border-left-color: #ff6b6b; }
+.bq-pillar.critical { border-left-color: #dc2626; }
+
+/* Top section — score display */
+.bq-pillar-top {
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   border-bottom: 1px solid var(--border);
 }
-.bq-pillar table { min-width: 0; font-size: 0.83rem; }
+
+.bq-pillar-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--mute);
+}
+
+.bq-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.bq-score-num {
+  font-size: 2.1rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.bq-score-num.great { color: #4ade80; }
+.bq-score-num.good  { color: #86efac; }
+.bq-score-num.warn  { color: #f5b942; }
+.bq-score-num.bad   { color: #ff6b6b; }
+.bq-score-num.critical { color: #dc2626; }
+
+.bq-score-denom {
+  font-size: 0.9rem;
+  color: var(--mute);
+  font-weight: 500;
+  align-self: flex-end;
+  margin-bottom: 3px;
+}
+
+/* Progress track */
+.bq-score-track {
+  height: 5px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+.bq-score-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+.bq-score-fill.great { background: #4ade80; }
+.bq-score-fill.good  { background: #86efac; }
+.bq-score-fill.warn  { background: #f5b942; }
+.bq-score-fill.bad   { background: #ff6b6b; }
+.bq-score-fill.critical { background: #dc2626; }
+
+.bq-verdict-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--fg);
+  margin-top: 1px;
+}
+
+/* Body — AI text + collapsible details */
+.bq-pillar-body {
+  padding: 12px 16px 14px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.bq-ai-text {
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--fg);
+  margin: 0 0 10px;
+}
+
+/* Collapsible details table */
+details.bq-details { margin-top: 4px; }
+details.bq-details > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 7px 0 5px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+}
+details.bq-details > summary::-webkit-details-marker { display: none; }
+details.bq-details > summary::before {
+  content: '▶';
+  font-size: 0.55rem;
+  opacity: 0.6;
+  transition: transform 0.18s;
+  display: inline-block;
+}
+details.bq-details[open] > summary::before { transform: rotate(90deg); }
+.bq-pillar table { min-width: 0; font-size: 0.82rem; margin-top: 6px; }
 
 /* ---- Business model / per-$1,000 panel ---- */
 .biz-model-panel {
@@ -1049,6 +1158,145 @@ table.guidance-tracker td:first-child { width: 40%; }
 
 footer { margin-top: 30px; }
 
+/* ── DCF Scenario Analysis (Step 3) ────────────────────── */
+.dcf-scenarios {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.dcf-scenario {
+  display: grid;
+  grid-template-columns: 152px 1fr auto;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* Highlighted base model card */
+.dcf-scenario.base {
+  border: 2px solid #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59,130,246,0.15);
+}
+
+/* Left accent stripe */
+.dcf-scenario.ultra-bull { border-left: 4px solid #4ade80; }
+.dcf-scenario.bull        { border-left: 4px solid #86efac; }
+.dcf-scenario.bear        { border-left: 4px solid #f5b942; }
+.dcf-scenario.ultra-bear  { border-left: 4px solid #ff6b6b; }
+
+/* Left column — label chip + scenario name */
+.dcs-left {
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-right: 1px solid var(--border);
+  justify-content: center;
+}
+
+.dcs-tag {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  width: fit-content;
+}
+.ultra-bull .dcs-tag { background: rgba(74,222,128,0.18);  color: #4ade80; }
+.bull        .dcs-tag { background: rgba(134,239,172,0.18); color: #86efac; }
+.base        .dcs-tag { background: rgba(96,165,250,0.2);   color: #60a5fa; }
+.bear        .dcs-tag { background: rgba(245,185,66,0.18);  color: #f5b942; }
+.ultra-bear  .dcs-tag { background: rgba(255,107,107,0.18); color: #ff6b6b; }
+
+.dcs-name {
+  font-size: 0.97rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* Middle column — assumption groups */
+.dcs-mid {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dcs-group { display: flex; flex-direction: column; gap: 2px; }
+
+.dcs-hdr {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dcs-val {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.dcs-desc {
+  font-size: 0.80rem;
+  color: var(--mute);
+  line-height: 1.45;
+  margin-top: 1px;
+}
+
+.dcs-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+
+/* Right column — IV price + upside */
+.dcs-right {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 140px;
+  text-align: right;
+  border-left: 1px solid var(--border);
+}
+
+.dcs-iv {
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.ultra-bull .dcs-iv { color: #4ade80; }
+.bull        .dcs-iv { color: #86efac; }
+.base        .dcs-iv { color: #60a5fa; }
+.bear        .dcs-iv { color: #f5b942; }
+.ultra-bear  .dcs-iv { color: #ff6b6b; }
+
+.dcs-upside {
+  font-size: 0.80rem;
+  font-weight: 600;
+  margin-top: 5px;
+}
+.ultra-bull .dcs-upside { color: #4ade80; }
+.bull        .dcs-upside { color: #86efac; }
+.base        .dcs-upside { color: #60a5fa; }
+.bear        .dcs-upside { color: #f5b942; }
+.ultra-bear  .dcs-upside { color: #ff6b6b; }
+
+/* ── Responsive: collapse to single column on small screens ── */
+@media (max-width: 640px) {
+  .dcf-scenario { grid-template-columns: 1fr; }
+  .dcs-left { border-right: none; border-bottom: 1px solid var(--border); }
+  .dcs-right { align-items: flex-start; text-align: left; border-left: none;
+               border-top: 1px solid var(--border); padding: 12px 16px; }
+}
+
 /* ══════════════════════════════════════════
    PRINT / PDF  —  switches to light mode
    CSS variables alone don't override element
@@ -1253,6 +1501,32 @@ ol.ai-watch-list li[data-n="1"]::before {
   .pane-label                 { color: #374151 !important; }
   .moat-pane                  { border-color: #d1d5db !important; }
 
+  /* ── Redesigned BQ Pillar Cards ─────────────── */
+  .bq-pillar                  { background: #f4f5f7 !important; border-color: #d1d5db !important; }
+  .bq-pillar.great            { border-left-color: #16a34a !important; }
+  .bq-pillar.good             { border-left-color: #22c55e !important; }
+  .bq-pillar.warn             { border-left-color: #d97706 !important; }
+  .bq-pillar.bad              { border-left-color: #dc2626 !important; }
+  .bq-pillar.critical         { border-left-color: #7c2d12 !important; }
+  .bq-pillar-top              { border-bottom-color: #d1d5db !important; }
+  .bq-pillar-label            { color: #6b7280 !important; }
+  .bq-verdict-text            { color: #0f172a !important; }
+  .bq-score-num               { color: #1e40af !important; }
+  .bq-score-num.great         { color: #15803d !important; }
+  .bq-score-num.good          { color: #16a34a !important; }
+  .bq-score-num.warn          { color: #b45309 !important; }
+  .bq-score-num.bad           { color: #dc2626 !important; }
+  .bq-score-num.critical      { color: #7c2d12 !important; }
+  .bq-score-denom             { color: #6b7280 !important; }
+  .bq-score-track             { background: #d1d5db !important; }
+  .bq-score-fill.great        { background: #16a34a !important; }
+  .bq-score-fill.good         { background: #22c55e !important; }
+  .bq-score-fill.warn         { background: #d97706 !important; }
+  .bq-score-fill.bad          { background: #dc2626 !important; }
+  .bq-score-fill.critical     { background: #7c2d12 !important; }
+  .bq-ai-text                 { color: #1a1a2e !important; }
+  details.bq-details > summary { color: #6b7280 !important; border-top-color: #d1d5db !important; }
+
   /* ── Risk 10-K cards ─────────────────────── */
   .risk10k-card               { border-left-width: 3px !important; background: #f4f5f7 !important; }
   .risk10k-title              { color: #0f172a !important; }
@@ -1365,4 +1639,25 @@ ol.ai-watch-list li[data-n="1"]::before {
 
   /* ── Deep research mode badge ────────────── */
   .deep-mode-badge            { background: #e0e7ff !important; color: #3730a3 !important; }
+
+  /* ── DCF Scenario cards ──────────────────── */
+  .dcf-scenario               { background: #f4f5f7 !important; border-color: #d1d5db !important; }
+  .dcf-scenario.base          { border-color: #3b82f6 !important; }
+  .dcs-left, .dcs-right       { background: transparent !important; border-color: #d1d5db !important; }
+  .dcs-name                   { color: #0f172a !important; }
+  .dcs-val                    { color: #0f172a !important; }
+  .dcs-hdr                    { color: #6b7280 !important; }
+  .dcs-desc                   { color: #6b7280 !important; }
+  .dcs-sep                    { background: #d1d5db !important; }
+  /* Keep scenario accent colours in print but darken for legibility */
+  .ultra-bull .dcs-tag  { background: #dcfce7 !important; color: #15803d !important; }
+  .bull .dcs-tag         { background: #dcfce7 !important; color: #166534 !important; }
+  .base .dcs-tag         { background: #dbeafe !important; color: #1e40af !important; }
+  .bear .dcs-tag         { background: #fef3c7 !important; color: #92400e !important; }
+  .ultra-bear .dcs-tag   { background: #fee2e2 !important; color: #991b1b !important; }
+  .ultra-bull .dcs-iv, .ultra-bull .dcs-upside { color: #15803d !important; }
+  .bull .dcs-iv,         .bull .dcs-upside      { color: #166534 !important; }
+  .base .dcs-iv,         .base .dcs-upside      { color: #1e40af !important; }
+  .bear .dcs-iv,         .bear .dcs-upside      { color: #92400e !important; }
+  .ultra-bear .dcs-iv,   .ultra-bear .dcs-upside { color: #991b1b !important; }
 }

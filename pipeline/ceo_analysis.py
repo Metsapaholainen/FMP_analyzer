@@ -159,10 +159,12 @@ def build_ceo_analysis(raw: dict, fundamentals: dict, moat: dict) -> dict:
         n_paired = min(len(cf_a), len(pb_hist), 5)
 
         gross_buybacks = 0.0
-        sbc_5y = 0.0
         buyback_years = []
         pb_at_buyback = []
 
+        # Collect raw SBC per year first so we can detect restructuring/spinoff outliers
+        # (e.g. Yandex Russia era grants inflate NBIS 5Y SBC by ~5-6x)
+        _sbc_raw = []
         for i in range(n_paired):
             bb = _safe(cf_a[i].get("commonStockRepurchased"))
             sbc = _safe(cf_a[i].get("stockBasedCompensation")) or 0.0
@@ -172,7 +174,23 @@ def build_ceo_analysis(raw: dict, fundamentals: dict, moat: dict) -> dict:
                 buyback_years.append(abs(bb))
                 if pb is not None:
                     pb_at_buyback.append(pb)
-            sbc_5y += sbc
+            _sbc_raw.append(sbc)
+
+        # Outlier filter: if any year's SBC exceeds 3× the median of *other* years,
+        # exclude it — it represents a restructuring/spinoff equity grant, not ongoing comp.
+        if len(_sbc_raw) >= 3:
+            sbc_5y = 0.0
+            sbc_excluded = 0.0
+            for j, v in enumerate(_sbc_raw):
+                others = [x for k, x in enumerate(_sbc_raw) if k != j and x > 0]
+                if others:
+                    median_others = sorted(others)[len(others) // 2]
+                    if v > median_others * 3:
+                        sbc_excluded += v
+                        continue
+                sbc_5y += v
+        else:
+            sbc_5y = sum(_sbc_raw)
 
         net_buybacks = gross_buybacks - sbc_5y
         market_cap = snap.get("market_cap") or 1

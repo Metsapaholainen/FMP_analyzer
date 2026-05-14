@@ -156,9 +156,28 @@ def build_fundamentals(raw: dict) -> dict:
                    or _safe(income_ttm_ep.get("revenue"))
                    or _safe(income_a[0].get("revenue") if income_a else None))
     # Net income TTM
-    net_income_ttm = (_sum_quarters(income_q, "netIncome")
-                      or _safe(income_ttm_ep.get("netIncome"))
-                      or _safe(income_a[0].get("netIncome") if income_a else None))
+    # Prefer netIncomeFromContinuingOperations (excludes one-time discontinued-ops
+    # gains/losses) when available; fall back to netIncome.
+    _ni_cont_q = _sum_quarters(income_q, "netIncomeFromContinuingOperations")
+    _ni_cont_annual = _safe(income_a[0].get("netIncomeFromContinuingOperations") if income_a else None)
+    _ni_cont_ep = _safe(income_ttm_ep.get("netIncomeFromContinuingOperations"))
+    net_income_cont_ttm = (_ni_cont_q or _ni_cont_ep or _ni_cont_annual)
+
+    _ni_all_q = _sum_quarters(income_q, "netIncome")
+    _ni_all_ep = _safe(income_ttm_ep.get("netIncome"))
+    _ni_all_annual = _safe(income_a[0].get("netIncome") if income_a else None)
+    net_income_all_ttm = (_ni_all_q or _ni_all_ep or _ni_all_annual)
+
+    # Flag when discontinued-operations income materially inflates headline NI
+    _discops_material = False
+    if net_income_cont_ttm is not None and net_income_all_ttm is not None and net_income_all_ttm != 0:
+        _discops_ratio = abs(net_income_all_ttm - net_income_cont_ttm) / abs(net_income_all_ttm)
+        _discops_material = _discops_ratio >= 0.15  # >15% of NI from discontinued ops
+
+    # Use continuing-operations NI when available (more representative of ongoing business)
+    net_income_ttm = net_income_cont_ttm or net_income_all_ttm
+    # Preserve the "all-in" figure for red-flag comparison
+    net_income_all_ttm_snap = net_income_all_ttm
     # EPS TTM (can't simply sum — use ratio endpoint or latest annual)
     eps_ttm = (_safe(ratios_ttm.get("epsTTM"))
                or _safe(income_ttm_ep.get("epsdiluted"))
@@ -179,12 +198,29 @@ def build_fundamentals(raw: dict) -> dict:
                    or _safe(income_ttm_ep.get("interestExpense"))
                    or _safe(income_a[0].get("interestExpense") if income_a else None))
     # FCF / OCF TTM
-    fcf_ttm = (_sum_quarters(cf_q, "freeCashFlow")
-               or _safe(cf_ttm_ep.get("freeCashFlow"))
-               or _safe(cf_a[0].get("freeCashFlow") if cf_a else None))
-    ocf_ttm = (_sum_quarters(cf_q, "operatingCashFlow")
-               or _safe(cf_ttm_ep.get("operatingCashFlow"))
-               or _safe(cf_a[0].get("operatingCashFlow") if cf_a else None))
+    # For foreign filers (20-F) FMP often has incomplete quarterly cash flow data
+    # (capex = 0 for some quarters), causing the quarterly sum to materially
+    # understate the true FCF burn. Guard: if the most-recent annual FCF is
+    # significantly more negative than the quarterly sum, use the annual figure.
+    _fcf_q_sum = _sum_quarters(cf_q, "freeCashFlow")
+    _fcf_annual = _safe(cf_a[0].get("freeCashFlow") if cf_a else None)
+    _fcf_ttm_ep_val = _safe(cf_ttm_ep.get("freeCashFlow"))
+    if (_fcf_q_sum is not None and _fcf_annual is not None
+            and _fcf_annual < 0 and _fcf_q_sum > _fcf_annual * 0.5):
+        # Quarterly sum is suspiciously less-negative than annual (>50% gap) —
+        # capex likely missing from some quarters (common for 20-F filers on FMP).
+        fcf_ttm = _fcf_annual
+    else:
+        fcf_ttm = _fcf_q_sum or _fcf_ttm_ep_val or _fcf_annual
+
+    _ocf_q_sum = _sum_quarters(cf_q, "operatingCashFlow")
+    _ocf_annual = _safe(cf_a[0].get("operatingCashFlow") if cf_a else None)
+    _ocf_ttm_ep_val = _safe(cf_ttm_ep.get("operatingCashFlow"))
+    if (_ocf_q_sum is not None and _ocf_annual is not None
+            and _ocf_annual < 0 and _ocf_q_sum > _ocf_annual * 0.5):
+        ocf_ttm = _ocf_annual
+    else:
+        ocf_ttm = _ocf_q_sum or _ocf_ttm_ep_val or _ocf_annual
     sbc_ttm = (_sum_quarters(cf_q, "stockBasedCompensation")
                or _safe(cf_ttm_ep.get("stockBasedCompensation"))
                or _safe(cf_a[0].get("stockBasedCompensation") if cf_a else None))
@@ -476,7 +512,9 @@ def build_fundamentals(raw: dict) -> dict:
         "website": profile.get("website"),
         "ipo_date": profile.get("ipoDate"),
         "revenue_ttm": revenue_ttm,
-        "net_income_ttm": net_income_ttm,
+        "net_income_ttm": net_income_ttm,        # continuing-operations NI (preferred)
+        "net_income_all_ttm": net_income_all_ttm_snap,  # incl. discontinued ops
+        "discops_material": _discops_material,   # True when disc-ops > 15% of headline NI
         "eps_ttm": eps_ttm,
         "fcf_ttm": fcf_ttm,
         "ocf_ttm": ocf_ttm,

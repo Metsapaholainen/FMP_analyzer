@@ -188,4 +188,21 @@ def detect_red_flags(raw: dict, fundamentals: dict) -> list[dict]:
                            "Financial fragility is elevated — monitor liquidity carefully."),
             })
 
+    # 10. Discontinued operations materially inflate headline net income
+    if snap.get("discops_material"):
+        ni_all = _safe(snap.get("net_income_all_ttm")) or 0.0
+        ni_cont = _safe(snap.get("net_income_ttm")) or 0.0
+        discops_gain = ni_all - ni_cont
+        flags.append({
+            "code": "discontinued_ops_income",
+            "severity": "medium",
+            "title": "Headline net income inflated by discontinued operations",
+            "detail": (
+                f"Discontinued-operations gain/loss of ${discops_gain/1e6:.0f}M "
+                f"accounts for >{abs(discops_gain / ni_all * 100):.0f}% of reported net income "
+                f"(${ni_all/1e6:.0f}M). Ongoing business earned ${ni_cont/1e6:.0f}M TTM. "
+                "Reported P/E and net margin overstate recurring profitability."
+            ),
+        })
+
     return flags

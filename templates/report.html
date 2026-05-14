@@ -510,6 +510,10 @@
     {% endif %}
     <div class="per1k-note">Top rows sum to ~$1,000 · per $1,000 revenue{% if p1k_top.year %} · FY{{ p1k_top.year }}{% endif %}{% if p1k_top.revenue_b %} · total ${{ p1k_top.revenue_b }}B{% endif %}</div>
   </div>
+  {# Business model plain-English summary lives here, right below the chart it describes #}
+  {% if report.ai_step4 and report.ai_step4.business_model %}
+  <p class="biz-model-text" style="margin-top:14px">{{ report.ai_step4.business_model }}</p>
+  {% endif %}
 </section>
 {% endif %}
 
@@ -899,11 +903,19 @@
   </div>
 
   {% if v.dcf %}
-  <h3>Two-stage DCF</h3>
+  <h3>Two-stage DCF — base model</h3>
+  {% if v.dcf.debt_dominated %}
+  <div class="flag-card sev-high" style="margin-bottom:12px">
+    <div class="flag-head"><strong>⚠ Net debt exceeds modelled equity value</strong></div>
+    <p style="margin:4px 0 0;font-size:0.85rem">The DCF of the FCF stream is positive, but after subtracting net debt the equity value per share is <strong>${{ num(v.dcf.intrinsic_value_per_share) }}</strong> — negative or near zero at current assumptions. This is a debt burden signal, not a data error. The scenario grid below shows at which WACC / growth combinations equity turns positive.</p>
+  </div>
+  {% endif %}
   <div class="kvgrid">
-    <div><span>Intrinsic value / share</span><strong>${{ num(v.dcf.intrinsic_value_per_share) }}</strong></div>
+    <div><span>Intrinsic value / share</span><strong class="qval {{ 'bad' if v.dcf.debt_dominated else '' }}">${{ num(v.dcf.intrinsic_value_per_share) }}</strong></div>
     <div><span>Current price</span><strong>${{ num(v.dcf.current_price) }}</strong></div>
+    {% if not v.dcf.debt_dominated %}
     <div><span>Margin of safety</span><strong class="qval {% if v.dcf.margin_of_safety and v.dcf.margin_of_safety >= 0.30 %}great{% elif v.dcf.margin_of_safety and v.dcf.margin_of_safety >= 0.10 %}good{% elif v.dcf.margin_of_safety and v.dcf.margin_of_safety < 0 %}bad{% endif %}">{{ pct(v.dcf.margin_of_safety) }}</strong></div>
+    {% endif %}
     <div><span>FCF base used</span><strong>${{ big(v.dcf.fcf_base_used) }}{% if v.dcf.base_label %} <span style="font-weight:400;font-size:0.8rem;color:var(--mute)">({{ v.dcf.base_label }})</span>{% endif %}</strong></div>
     <div><span>Growth assumed</span><strong>{{ pct(v.dcf.growth_assumed) }}</strong></div>
     <div><span>WACC</span><strong>{{ pct(v.dcf.wacc) }}</strong></div>
@@ -911,6 +923,44 @@
     {% if v.fmp_dcf and v.fmp_dcf.value %}<div><span>FMP DCF (cross-check)</span><strong>${{ num(v.fmp_dcf.value) }}</strong></div>{% endif %}
   </div>
   <p class="hint">{{ v.dcf.method }}</p>
+
+  {# ── Scenario sensitivity grid ─────────────────────────────────── #}
+  {% if v.scenarios %}
+  <h3 style="margin-top:22px">DCF scenario analysis — assumption guide</h3>
+  <p class="sub">Five scenarios spanning ultra-optimistic to structural-disruption. Each range shows the IV per share at the pessimistic and optimistic corners of that scenario's WACC / terminal growth band. The highlighted card matches the base model above.</p>
+  <div class="dcf-scenarios">
+    {% for sc in v.scenarios %}
+    <div class="dcf-scenario {{ sc.tag }}">
+      {# Left column #}
+      <div class="dcs-left">
+        <span class="dcs-tag">{{ sc.label }}</span>
+        <div class="dcs-name">{{ sc.name }}</div>
+      </div>
+      {# Middle column — assumptions #}
+      <div class="dcs-mid">
+        <div class="dcs-group">
+          <div class="dcs-hdr">Discount rate</div>
+          <div class="dcs-val">{{ sc.wacc_display }}</div>
+          <div class="dcs-desc">{{ sc.wacc_desc }}</div>
+        </div>
+        <div class="dcs-sep"></div>
+        <div class="dcs-group">
+          <div class="dcs-hdr">Terminal growth</div>
+          <div class="dcs-val">{{ sc.tg_display }}</div>
+          <div class="dcs-desc">{{ sc.tg_desc }}</div>
+        </div>
+      </div>
+      {# Right column — IV + upside #}
+      <div class="dcs-right">
+        <div class="dcs-iv">{{ sc.iv_display }}</div>
+        {% if sc.upside_display %}<div class="dcs-upside">{{ sc.upside_display }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="hint" style="margin-top:10px">FCF base: ${{ big(v.dcf.fcf_base_used) }} ({{ v.dcf.base_label }}). Growth assumed: {{ pct(v.dcf.growth_assumed) }}. All five scenarios use the same FCF base and growth trajectory; only the risk discount rate and long-run terminal growth differ. WACC floored at 5%, capped at 14%. Terminal growth capped at 5.5%.</p>
+  {% endif %}
+
   {% elif v.skip_dcf %}
   <p class="hint">DCF skipped: not meaningful for {{ s.sector }}. Use book-value/AFFO-based metrics instead.</p>
   {% else %}
@@ -1132,62 +1182,75 @@
   </details>
   {% endif %}
 
-  {# Business model plain-English summary (chart moved to top-of-page section) #}
-  {% set biz_text = fa_ai.get('business_model') if fa_ai else "" %}
-  {% if biz_text %}
-  <p class="biz-model-text">{{ biz_text }}</p>
-  {% endif %}
-
   <div class="bq-grid">
     {% for key, pillar in fa.pillars.items() %}
-    <div class="bq-pillar">
-      <div class="bq-pillar-head">
-        <span class="pane-label">{{ key.replace('_', ' ').title() }}</span>
-        <span class="big-score {{ bq_score_class(pillar.score, pillar.max_score) }}">{{ pillar.score }}/{{ pillar.max_score }}</span>
-        <strong style="font-size:0.88rem">{{ pillar.verdict }}</strong>
+    {%- set qc = bq_score_class(pillar.score, pillar.max_score) %}
+    {%- set pct = ((pillar.score / pillar.max_score * 100) | round(1)) if pillar.max_score else 0 %}
+    <div class="bq-pillar {{ qc }}">
+
+      {# ── Score header ── #}
+      <div class="bq-pillar-top">
+        <div class="bq-pillar-label">{{ key.replace('_', ' ') }}</div>
+        <div class="bq-score-row">
+          <span class="bq-score-num {{ qc }}">{{ pillar.score }}</span>
+          <span class="bq-score-denom">/ {{ pillar.max_score }}</span>
+        </div>
+        <div class="bq-score-track">
+          <div class="bq-score-fill {{ qc }}" style="width:{{ pct }}%"></div>
+        </div>
+        <div class="bq-verdict-text">{{ pillar.verdict }}</div>
       </div>
-      {% set ai_note = fa_ai.get(key) if fa_ai else "" %}
-      {% if ai_note %}
-      <p style="font-size:0.87rem;color:var(--fg);margin:0 0 10px;line-height:1.5">{{ ai_note }}</p>
-      {% endif %}
-      {% if pillar.points %}
-      {%- set seg_header_list = pillar.points | selectattr('_seg_header', 'defined') | list %}
-      {%- set has_segs = seg_header_list | length > 0 %}
-      <div class="tablewrap">
-      <table>
-        <tbody>
-        {% for pt in pillar.points %}
-          {% if not pt.get('_seg_header') and not pt.get('_seg_row') %}
-          <tr>
-            <th style="white-space:nowrap">{{ pt.label }}</th>
-            <td style="font-weight:600">{{ pt.value }}</td>
-            <td style="color:var(--mute);font-size:0.83rem">{{ pt.note }}</td>
-          </tr>
-          {% endif %}
-        {% endfor %}
-        </tbody>
-      </table>
-      </div>
-      {% if has_segs %}
-      {%- set seg_hdr = seg_header_list | first %}
-      <div class="seg-breakdown">
-        <div class="seg-breakdown-label">Segment growth — {{ seg_hdr.note }}</div>
-        {% for pt in pillar.points %}
-          {% if pt.get('_seg_row') %}
-          {%- set pct_num = pt.value.split('%')[0] | trim %}
-          <div class="seg-row">
-            <div class="seg-row-top">
-              <span class="seg-name">{{ pt.label }}</span>
-              <div class="seg-bar-wrap"><div class="seg-bar" style="width:{{ pct_num }}%"></div></div>
-              <span class="seg-pct">{{ pt.value }}</span>
-            </div>
-            <div class="seg-note-text">{{ pt.note }}</div>
+
+      {# ── Body: AI narrative + collapsible detail table ── #}
+      <div class="bq-pillar-body">
+        {% set ai_note = fa_ai.get(key) if fa_ai else "" %}
+        {% if ai_note %}
+        <p class="bq-ai-text">{{ ai_note }}</p>
+        {% endif %}
+
+        {% if pillar.points %}
+        {%- set seg_header_list = pillar.points | selectattr('_seg_header', 'defined') | list %}
+        {%- set has_segs = seg_header_list | length > 0 %}
+        <details class="bq-details">
+          <summary>Data points</summary>
+          <div class="tablewrap">
+          <table>
+            <tbody>
+            {% for pt in pillar.points %}
+              {% if not pt.get('_seg_header') and not pt.get('_seg_row') %}
+              <tr>
+                <th style="white-space:nowrap">{{ pt.label }}</th>
+                <td style="font-weight:600">{{ pt.value }}</td>
+                <td style="color:var(--mute);font-size:0.83rem">{{ pt.note }}</td>
+              </tr>
+              {% endif %}
+            {% endfor %}
+            </tbody>
+          </table>
+          </div>
+          {% if has_segs %}
+          {%- set seg_hdr = seg_header_list | first %}
+          <div class="seg-breakdown">
+            <div class="seg-breakdown-label">Segment growth — {{ seg_hdr.note }}</div>
+            {% for pt in pillar.points %}
+              {% if pt.get('_seg_row') %}
+              {%- set pct_num = pt.value.split('%')[0] | trim %}
+              <div class="seg-row">
+                <div class="seg-row-top">
+                  <span class="seg-name">{{ pt.label }}</span>
+                  <div class="seg-bar-wrap"><div class="seg-bar" style="width:{{ pct_num }}%"></div></div>
+                  <span class="seg-pct">{{ pt.value }}</span>
+                </div>
+                <div class="seg-note-text">{{ pt.note }}</div>
+              </div>
+              {% endif %}
+            {% endfor %}
           </div>
           {% endif %}
-        {% endfor %}
+        </details>
+        {% endif %}
       </div>
-      {% endif %}
-      {% endif %}
+
     </div>
     {% endfor %}
   </div>
