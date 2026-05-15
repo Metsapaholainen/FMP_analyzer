@@ -424,12 +424,12 @@
       <span class="roic-spread-hdr">Int % rev</span>
     </div>
     {% for row in it.rows %}
-    <div class="tie-row">
-      <span class="roic-year">{{ row.year }}</span>
+    <div class="tie-row{% if row.is_projection %} projection{% endif %}">
+      <span class="roic-year">{{ row.year }}{% if row.is_projection %}<span class="proj-badge">est.</span>{% endif %}</span>
       <div class="roic-bar-wrap">
         {% if not row.no_interest and row.tie_ebit is not none %}
           {% set bar_w = [[row.tie_ebit, 0] | max / tie_scale * 100, 100] | min | round(1) %}
-          <div class="roic-bar {{ row.tie_q }}" style="width:{{ bar_w }}%"></div>
+          <div class="roic-bar {{ row.tie_q }}{% if row.is_projection %} proj-bar{% endif %}" style="width:{{ bar_w }}%"></div>
         {% endif %}
         <div class="roic-wacc-line" style="left:{{ (2 / tie_scale * 100) | round(1) }}%"></div>
         <div class="roic-wacc-line" style="left:{{ (5 / tie_scale * 100) | round(1) }}%;background:#5dd39e;opacity:0.4"></div>
@@ -456,6 +456,55 @@
   <p class="hint" style="margin-top:12px">No meaningful interest expense detected — company carries little or no debt.</p>
   {% endif %}
 
+</section>
+{% endif %}
+
+<!-- CURRENT YEAR OUTLOOK -->
+{% set cyo = report.current_year_outlook %}
+{% if cyo and cyo.metrics %}
+<section class="card">
+  <h2>{{ cyo.year }} outlook — current year in progress</h2>
+  <p class="sub cyo-meta">{{ cyo.quarters_label }}{% if cyo.guidance_text %} &nbsp;·&nbsp; <em>{{ cyo.guidance_text }}</em>{% endif %}</p>
+  <div class="cyo-grid">
+    {% for m in cyo.metrics %}
+    {% if m.is_pct %}
+    {# Percentage metrics (Gross Margin) #}
+    <div class="cyo-card">
+      <div class="cyo-label">{{ m.name }}</div>
+      <div class="cyo-value">{{ m.projected }}%</div>
+      {% if m.prior is not none %}<div class="cyo-prior">Prior: {{ m.prior }}%</div>{% endif %}
+      {% if m.yoy_pct is not none %}
+      <div class="cyo-yoy {{ 'pos' if m.yoy_pct > 0 else 'neg' if m.yoy_pct < 0 else '' }}">{{ '+' if m.yoy_pct > 0 else '' }}{{ m.yoy_pct }}pp vs {{ cyo.year | int - 1 }}</div>
+      {% endif %}
+      <div class="cyo-source">YTD actual</div>
+    </div>
+    {% elif m.is_per_share %}
+    {# Per-share metrics (EPS) #}
+    <div class="cyo-card">
+      <div class="cyo-label">{{ m.name }} (est. FY{{ cyo.year }})</div>
+      <div class="cyo-value">${{ m.projected }}</div>
+      {% if m.prior is not none %}<div class="cyo-prior">Prior: ${{ m.prior }}</div>{% endif %}
+      {% if m.yoy_pct is not none %}
+      <div class="cyo-yoy {{ 'pos' if m.yoy_pct > 0 else 'neg' if m.yoy_pct < 0 else '' }}">{{ '+' if m.yoy_pct > 0 else '' }}{{ m.yoy_pct }}% vs {{ cyo.year | int - 1 }}</div>
+      {% endif %}
+      <div class="cyo-source">{{ 'Guidance' if m.source == 'guidance' else 'YTD annualised' }}</div>
+    </div>
+    {% else %}
+    {# Billions metrics (Revenue, EBIT, EBITDA, Net Income, FCF) #}
+    <div class="cyo-card">
+      <div class="cyo-label">{{ m.name }} (est. FY{{ cyo.year }})</div>
+      <div class="cyo-value">${{ m.projected_b }}B</div>
+      {% if m.ytd_b is not none and m.prior_b is not none %}<div class="cyo-prior">YTD ${{ m.ytd_b }}B · Prior ${{ m.prior_b }}B</div>
+      {% elif m.prior_b is not none %}<div class="cyo-prior">Prior: ${{ m.prior_b }}B</div>{% endif %}
+      {% if m.yoy_pct is not none %}
+      <div class="cyo-yoy {{ 'pos' if m.yoy_pct > 0 else 'neg' if m.yoy_pct < 0 else '' }}">{{ '+' if m.yoy_pct > 0 else '' }}{{ m.yoy_pct }}% vs {{ cyo.year | int - 1 }}</div>
+      {% endif %}
+      <div class="cyo-source">{{ 'Guidance' if m.source == 'guidance' else 'YTD annualised' }}</div>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  <p class="hint" style="margin-top:8px">Estimates based on straight-line annualisation of reported quarters. "Guidance" = company-issued forward target extracted from recent press releases. Actual results will differ from annualised projections, especially for businesses with significant seasonality.</p>
 </section>
 {% endif %}
 
@@ -579,11 +628,11 @@
     </div>
     {% endif %}
     {% for row in rw.rows %}
-    <div class="roic-row">
-      <span class="roic-year">{{ row.year }}</span>
+    <div class="roic-row{% if row.is_projection %} projection{% endif %}">
+      <span class="roic-year">{{ row.year }}{% if row.is_projection %}<span class="proj-badge">est.</span>{% endif %}</span>
       <div class="roic-bar-wrap">
         {% set bar_w = [row.roic / roic_scale * 100, 100] | min | round(1) %}
-        <div class="roic-bar {{ row.roic_q }}" style="width:{{ bar_w }}%"></div>
+        <div class="roic-bar {{ row.roic_q }}{% if row.is_projection %} proj-bar{% endif %}" style="width:{{ bar_w }}%"></div>
         {% if rw.wacc_pct is not none %}
         <div class="roic-wacc-line" style="left:{{ [rw.wacc_pct / roic_scale * 100, 100] | min | round(1) }}%"></div>
         {% endif %}

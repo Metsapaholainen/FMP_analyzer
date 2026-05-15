@@ -1156,6 +1156,75 @@ table.guidance-tracker td:first-child { width: 40%; }
   gap: 8px;
 }
 
+/* ── Projection row modifier (ROIC & TIE charts) ────────────────────── */
+.roic-row.projection,
+.tie-row.projection { opacity: 0.78; }
+.proj-bar {
+  background: transparent !important;
+  border: 2px dashed currentColor;
+  position: relative;
+}
+.proj-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0.18;
+}
+.proj-badge {
+  font-size: 0.60rem;
+  font-weight: 500;
+  color: var(--mute);
+  margin-left: 3px;
+  vertical-align: middle;
+  letter-spacing: 0.03em;
+}
+
+/* ── Current Year Outlook panel ─────────────────────────────────────── */
+.cyo-meta { font-size: 0.82rem; color: var(--mute); margin-bottom: 1rem; }
+.cyo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.cyo-card {
+  background: var(--card);
+  border-radius: 8px;
+  padding: 0.85rem 0.9rem;
+  border-left: 3px solid var(--accent);
+}
+.cyo-label {
+  font-size: 0.68rem;
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.2rem;
+}
+.cyo-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--fg);
+  margin: 0.15rem 0;
+}
+.cyo-prior {
+  font-size: 0.70rem;
+  color: var(--mute);
+  margin-bottom: 0.15rem;
+}
+.cyo-yoy {
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+.cyo-yoy.pos { color: var(--green); }
+.cyo-yoy.neg { color: var(--bad); }
+.cyo-source {
+  font-size: 0.62rem;
+  color: var(--mute);
+  font-style: italic;
+}
+
 footer { margin-top: 30px; }
 
 /* ── DCF Scenario Analysis (Step 3) ────────────────────── */
@@ -1464,6 +1533,11 @@ ol.ai-watch-list li[data-n="1"]::before {
   .roic-bar.warn  { background: #f59e0b !important; opacity: 0.85; }
   .roic-bar.bad   { background: #ef4444 !important; opacity: 0.85; }
   .roic-wacc-line { background: #94a3b8 !important; }
+  .proj-bar { border-color: #6b7280 !important; }
+  .cyo-card { background: #f8fafc !important; border-left-color: #6366f1 !important; }
+  .cyo-value { color: #0f172a !important; }
+  .cyo-yoy.pos { color: #15803d !important; }
+  .cyo-yoy.neg { color: #dc2626 !important; }
 
   /* ── Tables ─────────────────────────────── */
   table           { border-collapse: collapse !important; }

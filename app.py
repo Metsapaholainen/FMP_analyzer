@@ -308,6 +308,7 @@ async def run_pipeline(ticker: str, moat_hypothesis: str = "", deep_research: bo
         "fundamental_analysis": fundamental_analysis,
         "transition_score": transition_score,
         "ai_step4": ai_step4,
+        "current_year_outlook": ai_step4.get("_current_year_outlook"),
         "ai": ai,
         # Store news/press-releases for in-page chat context (not full raw to keep cache small)
         "_news": raw.get("stock_news") or [],

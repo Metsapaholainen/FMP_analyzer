@@ -1309,6 +1309,276 @@ def _build_cash_gen(fundamentals: dict | None) -> dict | None:
     }
 
 
+def _build_current_year_projection(raw: dict, fundamentals: dict | None = None,
+                                   ceo: dict | None = None) -> dict | None:
+    """Estimate current calendar year full-year figures from available quarterly data.
+
+    Groups income_quarter by calendarYear, annualises YTD results (× 4/N) and
+    optionally extracts a guidance range from press releases via regex.
+
+    Returns None when no current-year quarters exist or when all available quarters
+    belong to a previously-closed fiscal year.
+    """
+    import datetime
+    import re
+    from collections import defaultdict
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    income_q = raw.get("income_quarter") or []
+    cf_q     = raw.get("cashflow_quarter") or []
+    bal_a    = raw.get("balance_annual") or []
+    income_a = raw.get("income_annual") or []
+    cf_a     = raw.get("cashflow_annual") or []
+
+    if not income_q:
+        return None
+
+    # ── Group quarters by calendarYear ──────────────────────────────────────────
+    by_year: dict[str, list] = defaultdict(list)
+    for q in income_q:
+        yr = str(q.get("calendarYear") or (q.get("date") or "")[:4] or "")
+        if yr and yr.isdigit() and len(yr) == 4:
+            by_year[yr].append(q)
+
+    if not by_year:
+        return None
+
+    current_year = max(by_year.keys())
+    this_year    = str(datetime.datetime.now().year)
+
+    # Only project when the most-recent quarterly data is from the current year
+    if current_year < this_year:
+        return None
+
+    current_quarters = by_year[current_year]
+    n = len(current_quarters)
+    if n == 0:
+        return None
+
+    scale = 4.0 / n  # annualisation factor (e.g. 4.0 for Q1-only)
+
+    # ── YTD sums ─────────────────────────────────────────────────────────────────
+    def _qsum(quarters, field):
+        vals = [_s(q.get(field)) for q in quarters]
+        return sum(v for v in vals if v is not None) if any(v is not None for v in vals) else None
+
+    ytd_rev    = _qsum(current_quarters, "revenue")
+    ytd_ebit   = _qsum(current_quarters, "operatingIncome")
+    ytd_ebitda = _qsum(current_quarters, "ebitda")
+    ytd_ni     = _qsum(current_quarters, "netIncome")
+    ytd_int    = _qsum(current_quarters, "interestExpense")
+    ytd_da     = _qsum(current_quarters, "depreciationAndAmortization")
+    ytd_gp     = _qsum(current_quarters, "grossProfit")
+
+    if ytd_ebitda is None and ytd_ebit is not None and ytd_da is not None:
+        ytd_ebitda = ytd_ebit + ytd_da
+
+    # EPS: sum of quarterly EPS (already per-share diluted)
+    eps_vals = [_s(q.get("epsDiluted") or q.get("eps")) for q in current_quarters]
+    ytd_eps  = sum(v for v in eps_vals if v is not None) if any(v is not None for v in eps_vals) else None
+
+    # FCF from cashflow quarters (cap at same N quarters as income)
+    cf_by_year: dict[str, list] = defaultdict(list)
+    for q in cf_q:
+        yr = str(q.get("calendarYear") or (q.get("date") or "")[:4] or "")
+        if yr and yr.isdigit():
+            cf_by_year[yr].append(q)
+    curr_cf_q = cf_by_year.get(current_year, [])[:n]
+    ytd_fcf   = _qsum(curr_cf_q, "freeCashFlow")
+
+    # ── Projected full-year ───────────────────────────────────────────────────────
+    proj_rev    = ytd_rev    * scale if ytd_rev    is not None else None
+    proj_ebit   = ytd_ebit   * scale if ytd_ebit   is not None else None
+    proj_ebitda = ytd_ebitda * scale if ytd_ebitda is not None else None
+    proj_ni     = ytd_ni     * scale if ytd_ni     is not None else None
+    proj_eps    = ytd_eps    * scale if ytd_eps    is not None else None
+    proj_fcf    = ytd_fcf    * scale if ytd_fcf    is not None else None
+    proj_gm_pct = (ytd_gp / ytd_rev * 100) if (ytd_gp is not None and ytd_rev and ytd_rev > 0) else None
+
+    # ── Prior-year actuals for YoY ────────────────────────────────────────────────
+    prior_inc    = income_a[0] if income_a else {}
+    prior_cf_rec = cf_a[0]     if cf_a     else {}
+
+    prior_rev    = _s(prior_inc.get("revenue"))
+    prior_ebit   = _s(prior_inc.get("operatingIncome"))
+    prior_ebitda = _s(prior_inc.get("ebitda"))
+    prior_ni     = _s(prior_inc.get("netIncome"))
+    prior_eps    = _s(prior_inc.get("epsDiluted") or prior_inc.get("eps"))
+    prior_fcf    = _s(prior_cf_rec.get("freeCashFlow"))
+    _prior_gp    = _s(prior_inc.get("grossProfit"))
+    prior_gm_pct = (_prior_gp / prior_rev * 100) if (_prior_gp is not None and prior_rev and prior_rev > 0) else None
+
+    def _yoy(proj, prior):
+        if proj is None or prior is None or prior == 0:
+            return None
+        return round((proj - prior) / abs(prior) * 100, 1)
+
+    # ── Guidance extraction from press releases (regex — no AI call) ──────────────
+    guidance_ebit_raw  = None
+    guidance_ebit_text = None
+    pr_text = ""
+    prs = raw.get("press_releases") or []
+    for pr in prs[:6]:
+        pr_text += " " + (pr.get("text") or pr.get("content") or pr.get("title") or "")
+
+    if pr_text.strip():
+        _guid_pats = [
+            # "targets/guidance X.X to X.X billion"
+            r"(?:target[s]?|guidance|expect[s]?|outlook|forecast[s]?|project[s]?)"
+            r".{0,150}?(\d+[\.,]?\d*)\s*(?:to|[-–])\s*(\d+[\.,]?\d*)\s*(?:billion|bn\b)",
+            # "$X.XB–$X.XB"
+            r"\$(\d+[\.,]?\d*)\s*[Bb]\s*(?:to|[-–])\s*\$?(\d+[\.,]?\d*)\s*[Bb]",
+        ]
+        for pat in _guid_pats:
+            m = re.search(pat, pr_text, re.IGNORECASE | re.DOTALL)
+            if m:
+                try:
+                    lo = float(m.group(1).replace(",", "."))
+                    hi = float(m.group(2).replace(",", "."))
+                    mid = (lo + hi) / 2.0
+                    guidance_ebit_raw  = mid * 1e9
+                    guidance_ebit_text = f"{lo:.1f}–{hi:.1f}B guidance range"
+                except (ValueError, IndexError):
+                    pass
+                break
+
+    # ── ROIC projection row ───────────────────────────────────────────────────────
+    roic_proj_row = None
+    if proj_ebit is not None and bal_a:
+        bal0 = bal_a[0]
+        eq   = _s(bal0.get("totalStockholdersEquity") or bal0.get("totalEquity"))
+        debt = _s(bal0.get("totalDebt") or bal0.get("longTermDebt"))
+        cash = _s(bal0.get("cashAndCashEquivalents") or bal0.get("cashAndShortTermInvestments"))
+        if eq is not None:
+            ic = (eq or 0) + (debt or 0) - (cash or 0)
+            if ic > 0:
+                pretax  = _s(prior_inc.get("incomeBeforeTax") or prior_inc.get("pretaxIncome"))
+                tax_exp = _s(prior_inc.get("incomeTaxExpense"))
+                tax_rate = 0.21
+                if pretax and pretax != 0 and tax_exp is not None:
+                    tax_rate = max(0.0, min(0.40, tax_exp / pretax))
+                nopat    = proj_ebit * (1 - tax_rate)
+                roic_p   = round(nopat / ic * 100, 1)
+                wacc_dec = (ceo or {}).get("wacc_used")
+                wacc_pct = round(wacc_dec * 100, 1) if wacc_dec is not None else None
+                spread_p = round(roic_p - wacc_pct, 1) if wacc_pct is not None else None
+                roic_q   = "great" if roic_p >= 20 else "good" if roic_p >= 12 else "warn" if roic_p >= 8 else "bad"
+                spread_q = (("great" if spread_p >= 10 else "good" if spread_p >= 5
+                              else "warn" if spread_p >= 0 else "bad")
+                             if spread_p is not None else roic_q)
+                roic_proj_row = {
+                    "year": current_year + "e", "roic": roic_p, "wacc": wacc_pct,
+                    "spread": spread_p, "roic_q": roic_q, "spread_q": spread_q,
+                    "is_projection": True,
+                }
+
+    # ── TIE projection row ────────────────────────────────────────────────────────
+    tie_proj_row = None
+    if proj_ebit is not None:
+        int_abs_proj    = abs(ytd_int * scale) if ytd_int is not None else None
+        no_int_proj     = (int_abs_proj is None or int_abs_proj <= 1_000)
+        tie_ebit_proj   = (round(proj_ebit   / int_abs_proj, 1) if (not no_int_proj and int_abs_proj) else None)
+        tie_ebitda_proj = (round(proj_ebitda / int_abs_proj, 1) if (not no_int_proj and int_abs_proj and proj_ebitda is not None) else None)
+        tie_q_proj      = ("great" if (tie_ebit_proj or 0) >= 10 else
+                            "good"  if (tie_ebit_proj or 0) >= 5  else
+                            "warn"  if (tie_ebit_proj or 0) >= 2  else "bad") if tie_ebit_proj is not None else ""
+        int_pct_rev_proj = (round(int_abs_proj / proj_rev * 100, 2)
+                            if (not no_int_proj and int_abs_proj and proj_rev and proj_rev > 0) else None)
+        tie_proj_row = {
+            "year":               current_year + "e",
+            "ebit_b":             round(proj_ebit   / 1e9, 4) if proj_ebit   is not None else None,
+            "ebitda_b":           round(proj_ebitda / 1e9, 4) if proj_ebitda is not None else None,
+            "interest_b":         round(int_abs_proj / 1e9, 4) if not no_int_proj else None,
+            "interest_pct_rev":   int_pct_rev_proj,
+            "tie_ebit":           tie_ebit_proj,
+            "tie_ebitda":         tie_ebitda_proj,
+            "tie_q":              tie_q_proj,
+            "no_interest":        no_int_proj,
+            "interest_estimated": False,
+            "is_projection":      True,
+        }
+
+    # ── Quarters label ────────────────────────────────────────────────────────────
+    reported_qnames = []
+    for q in sorted(current_quarters, key=lambda x: x.get("date") or ""):
+        period = (q.get("period") or "").upper()
+        if   "Q1" in period: qname = "Q1"
+        elif "Q2" in period: qname = "Q2"
+        elif "Q3" in period: qname = "Q3"
+        elif "Q4" in period: qname = "Q4"
+        else:
+            date_str = (q.get("date") or "")[:7]
+            try:
+                month = int(date_str[5:7])
+                qname = f"Q{(month - 1) // 3 + 1}"
+            except (ValueError, IndexError):
+                qname = None
+        if qname:
+            reported_qnames.append(qname)
+    if not reported_qnames:
+        reported_qnames = [f"Q{i+1}" for i in range(n)]
+    q_label = "+".join(reported_qnames)
+    quarters_label = f"Based on {q_label} {current_year} ({n} of 4 quarters reported)"
+
+    # ── Outlook metrics ───────────────────────────────────────────────────────────
+    ebit_proj_final = guidance_ebit_raw if guidance_ebit_raw is not None else proj_ebit
+    ebit_source     = "guidance"        if guidance_ebit_raw is not None else "ytd_annualized"
+
+    def _metric(name, ytd_v, proj_v, prior_v, source="ytd_annualized", is_pct=False, is_per_share=False):
+        if proj_v is None:
+            return None
+        yoy = _yoy(proj_v, prior_v)
+        if is_pct:
+            return {"name": name, "is_pct": True, "is_per_share": False,
+                    "projected_b": None, "ytd_b": None, "prior_b": None,
+                    "projected": round(proj_v, 1),
+                    "ytd_val": round(ytd_v, 1) if ytd_v is not None else None,
+                    "prior": round(prior_v, 1) if prior_v is not None else None,
+                    "yoy_pct": yoy, "source": source, "unit": "%"}
+        if is_per_share:
+            return {"name": name, "is_pct": False, "is_per_share": True,
+                    "projected_b": None, "ytd_b": None, "prior_b": None,
+                    "projected": round(proj_v, 2),
+                    "ytd_val": round(ytd_v, 2) if ytd_v is not None else None,
+                    "prior": round(prior_v, 2) if prior_v is not None else None,
+                    "yoy_pct": yoy, "source": source, "unit": "$"}
+        return {"name": name, "is_pct": False, "is_per_share": False, "unit": "$B",
+                "ytd_b":       round(ytd_v   / 1e9, 2) if ytd_v   is not None else None,
+                "projected_b": round(proj_v  / 1e9, 2),
+                "prior_b":     round(prior_v / 1e9, 2) if prior_v is not None else None,
+                "yoy_pct": yoy, "source": source}
+
+    raw_metrics = [
+        _metric("Revenue",        ytd_rev,    proj_rev,          prior_rev),
+        _metric("EBIT",           ytd_ebit,   ebit_proj_final,   prior_ebit,   source=ebit_source),
+        _metric("EBITDA",         ytd_ebitda, proj_ebitda,       prior_ebitda),
+        _metric("Net Income",     ytd_ni,     proj_ni,           prior_ni),
+        _metric("EPS",            ytd_eps,    proj_eps,          prior_eps,    is_per_share=True),
+        _metric("Free Cash Flow", ytd_fcf,    proj_fcf,          prior_fcf),
+        _metric("Gross Margin",   proj_gm_pct, proj_gm_pct,     prior_gm_pct, is_pct=True),
+    ]
+    metrics = [m for m in raw_metrics if m is not None]
+
+    if not metrics and roic_proj_row is None and tie_proj_row is None:
+        return None
+
+    return {
+        "year":           current_year,
+        "n_quarters":     n,
+        "quarters_label": quarters_label,
+        "guidance_text":  guidance_ebit_text,
+        "roic_proj_row":  roic_proj_row,
+        "tie_proj_row":   tie_proj_row,
+        "metrics":        metrics,
+    }
+
+
 def _build_interest_trend(raw: dict) -> dict | None:
     """Year-by-year times-interest-earned (TIE) trend.
 
@@ -2551,6 +2821,14 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     result["_net_debt_trend"]   = _build_net_debt_trend(raw, fundamentals)            if raw else None
     result["_interest_trend"]   = _build_interest_trend(raw)                          if raw else None
     result["_roic_wacc"]        = _build_roic_wacc_trend(raw, fundamentals, ceo)     if raw else None
+    # Current-year projection: compute once, inject rows into both charts
+    _cyp = _build_current_year_projection(raw, fundamentals, ceo) if raw else None
+    if _cyp:
+        if result["_interest_trend"] and _cyp.get("tie_proj_row"):
+            result["_interest_trend"]["rows"].insert(0, _cyp["tie_proj_row"])
+        if result["_roic_wacc"] and _cyp.get("roic_proj_row"):
+            result["_roic_wacc"]["rows"].insert(0, _cyp["roic_proj_row"])
+    result["_current_year_outlook"] = _cyp
     result["_10k_risks"]        = _extract_10k_risks(raw)                             if raw else None
     result["_quarterly_trend"]  = _build_quarterly_trend(raw)                         if raw else None
     result["_forward_estimates"]= _build_forward_estimates(raw, fundamentals)         if raw else None
