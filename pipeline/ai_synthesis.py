@@ -2526,6 +2526,20 @@ def _build_price_target_panel(raw: dict, fundamentals: dict | None) -> dict | No
         price_vs_consensus = round((price - t_avg) / t_avg * 100, 1)
         significantly_above_consensus = price_vs_consensus > 20  # >20% above mean target
 
+    # ── Currency mismatch heuristic ───────────────────────────────────────────────
+    # If price vs. avg target ratio is extreme (price > 3× target or target > 3× price
+    # for liquid stocks >$2), flag a possible currency mismatch (e.g. EUR targets vs USD ADR price)
+    currency_caution = False
+    if t_avg is not None and price is not None and price > 2 and t_avg > 0:
+        ratio = price / t_avg
+        if ratio > 2.5 or ratio < 0.4:
+            currency_caution = True
+
+    # ── Last updated date ─────────────────────────────────────────────────────────
+    last_updated = None
+    if pt:
+        last_updated = pt.get("lastUpdated") or pt.get("date") or None
+
     if not any(x is not None for x in [t_low, t_avg, t_med, t_high, buy]):
         return None
 
@@ -2546,6 +2560,8 @@ def _build_price_target_panel(raw: dict, fundamentals: dict | None) -> dict | No
         "rating":           rating,
         "price_vs_consensus": price_vs_consensus,
         "significantly_above_consensus": significantly_above_consensus,
+        "currency_caution": currency_caution,
+        "last_updated":     last_updated,
     }
 
 

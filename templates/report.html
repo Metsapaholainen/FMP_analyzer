@@ -462,7 +462,7 @@
 <!-- CURRENT YEAR OUTLOOK -->
 {% set cyo = report.current_year_outlook %}
 {% if cyo and cyo.metrics %}
-<section class="card">
+<section class="card cy-outlook">
   <h2>{{ cyo.year }} outlook — current year in progress</h2>
   <p class="sub cyo-meta">{{ cyo.quarters_label }}{% if cyo.guidance_text %} &nbsp;·&nbsp; <em>{{ cyo.guidance_text }}</em>{% endif %}</p>
   {% if cyo.has_q4_skew %}
@@ -1047,9 +1047,15 @@
     <span class="pt-analysts">{{ pt.total_analysts }} analyst{{ 's' if pt.total_analysts != 1 else '' }}</span>
     {% endif %}
     {% if pt.significantly_above_consensus %}
-    <span class="pt-warning">⚠ Stock trading {{ '%+.0f'|format(pt.price_vs_consensus) }}% above consensus target</span>
+    <span class="pt-warning">⚠ Stock {{ '%+.0f'|format(pt.price_vs_consensus) }}% above consensus target</span>
+    {% endif %}
+    {% if pt.last_updated %}
+    <span class="pt-updated">Updated {{ pt.last_updated[:10] }}</span>
     {% endif %}
   </div>
+  {% if pt.currency_caution %}
+  <div class="pt-currency-note">⚠ Large gap between current price (${{ pt.current_price }}) and analyst targets — verify targets are in the same currency as the listed price (e.g. USD vs EUR for foreign ADRs)</div>
+  {% endif %}
 
   {# Buy / Hold / Sell bar #}
   {% if pt.total_analysts and pt.buy is not none %}
@@ -1068,40 +1074,54 @@
       {% if pt.sell %}<span class="pt-bhs-lbl sell">Sell {{ pt.sell }}</span>{% endif %}
     </div>
   </div>
+  {% else %}
+  <p class="hint" style="margin:4px 0 10px">Rating breakdown not available for this ticker.</p>
   {% endif %}
 
   {# Price range visualisation #}
   {% if pt.target_low is not none and pt.target_high is not none and _price is not none %}
-  {% set _span   = pt.target_high - pt.target_low %}
-  {% set _lo_pct = 0 %}
-  {% set _hi_pct = 100 %}
+  {% set _span = pt.target_high - pt.target_low %}
   {# position current price, median, avg within the low→high range #}
   {% set _cur_pct = ((_price - pt.target_low) / _span * 100) | round(1) if _span > 0 else 50 %}
   {% set _med_pct = ((pt.target_median - pt.target_low) / _span * 100) | round(1) if (pt.target_median is not none and _span > 0) else none %}
   {% set _avg_pct = ((pt.target_avg - pt.target_low) / _span * 100) | round(1) if (pt.target_avg is not none and _span > 0) else none %}
-  {# Clamp to 0-100 for display #}
+  {# Clamp to 0–100 for display; track if price is out of target range #}
   {% set _cur_pct_c = [[_cur_pct, 0] | max, 100] | min %}
+  {% set _price_above_range = _cur_pct > 100 %}
+  {% set _price_below_range = _cur_pct < 0 %}
+  {# Current price is above avg target if above the reference point (or above high) #}
+  {% set _ref_for_color = pt.target_avg if pt.target_avg is not none else (pt.target_median if pt.target_median is not none else pt.target_high) %}
+  {% set _above_avg = (_price > _ref_for_color) if _ref_for_color is not none else false %}
   <div class="pt-range-wrap">
+    {% if _price_above_range %}
+    <div class="pt-range-note above-range">⚠ Current price (${{ _price }}) is above all analyst targets — possible overvaluation or stale targets</div>
+    {% elif _price_below_range %}
+    <div class="pt-range-note below-range">↑ Current price (${{ _price }}) is below all analyst targets — all analysts see upside</div>
+    {% endif %}
     <div class="pt-range-track">
       <div class="pt-range-fill"></div>
       {# Median marker #}
       {% if _med_pct is not none %}
-      <div class="pt-marker pt-marker-med" style="left:{{ [[_med_pct,0]|max,100]|min }}%" title="Median ${{ pt.target_median }}"></div>
+      <div class="pt-marker pt-marker-med" style="left:{{ [[_med_pct,0]|max,100]|min }}%" title="Median: ${{ pt.target_median }}"></div>
       {% endif %}
       {# Average marker #}
       {% if _avg_pct is not none %}
-      <div class="pt-marker pt-marker-avg" style="left:{{ [[_avg_pct,0]|max,100]|min }}%" title="Average ${{ pt.target_avg }}"></div>
+      <div class="pt-marker pt-marker-avg" style="left:{{ [[_avg_pct,0]|max,100]|min }}%" title="Average: ${{ pt.target_avg }}"></div>
       {% endif %}
       {# Current price marker — red if above avg, green if below #}
-      {% set _above_avg = (_price > (pt.target_avg or pt.target_median or pt.target_high)) %}
       <div class="pt-marker pt-marker-price {{ 'above' if _above_avg else 'below' }}"
-           style="left:{{ _cur_pct_c }}%" title="Current ${{ _price }}">
+           style="left:{{ _cur_pct_c }}%" title="Current price: ${{ _price }}">
         <span class="pt-price-label">Now ${{ _price }}</span>
       </div>
     </div>
     <div class="pt-range-endpoints">
       <span>Low ${{ pt.target_low }}</span>
       <span>High ${{ pt.target_high }}</span>
+    </div>
+    <div class="pt-range-legend">
+      <span class="pt-legend-dot med"></span><span>Median ${{ pt.target_median }}</span>
+      <span class="pt-legend-dot avg"></span><span>Avg ${{ pt.target_avg }}</span>
+      <span class="pt-legend-dot now {{ 'above' if _above_avg else 'below' }}"></span><span>Now ${{ _price }}</span>
     </div>
   </div>
   {% endif %}
@@ -1115,23 +1135,23 @@
     <tbody>
     {% if pt.target_low is not none %}
     <tr><td>Low</td><td>${{ pt.target_low }}</td>
-      <td class="qval {{ 'good' if pt.upside_low >= 0 else 'bad' }}" style="text-align:right">
-        {{ '%+.1f'|format(pt.upside_low) }}%</td></tr>
+      <td class="qval {{ 'good' if pt.upside_low is not none and pt.upside_low >= 0 else 'bad' if pt.upside_low is not none else '' }}" style="text-align:right">
+        {% if pt.upside_low is not none %}{{ '%+.1f'|format(pt.upside_low) }}%{% else %}—{% endif %}</td></tr>
     {% endif %}
     {% if pt.target_median is not none %}
     <tr><td>Median</td><td><strong>${{ pt.target_median }}</strong></td>
-      <td class="qval {{ 'good' if pt.upside_median >= 0 else 'bad' }}" style="text-align:right">
-        <strong>{{ '%+.1f'|format(pt.upside_median) }}%</strong></td></tr>
+      <td class="qval {{ 'good' if pt.upside_median is not none and pt.upside_median >= 0 else 'bad' if pt.upside_median is not none else '' }}" style="text-align:right">
+        <strong>{% if pt.upside_median is not none %}{{ '%+.1f'|format(pt.upside_median) }}%{% else %}—{% endif %}</strong></td></tr>
     {% endif %}
     {% if pt.target_avg is not none %}
     <tr><td>Average</td><td>${{ pt.target_avg }}</td>
-      <td class="qval {{ 'good' if pt.upside_avg >= 0 else 'bad' }}" style="text-align:right">
-        {{ '%+.1f'|format(pt.upside_avg) }}%</td></tr>
+      <td class="qval {{ 'good' if pt.upside_avg is not none and pt.upside_avg >= 0 else 'bad' if pt.upside_avg is not none else '' }}" style="text-align:right">
+        {% if pt.upside_avg is not none %}{{ '%+.1f'|format(pt.upside_avg) }}%{% else %}—{% endif %}</td></tr>
     {% endif %}
     {% if pt.target_high is not none %}
     <tr><td>High</td><td>${{ pt.target_high }}</td>
-      <td class="qval {{ 'good' if pt.upside_high >= 0 else 'bad' }}" style="text-align:right">
-        {{ '%+.1f'|format(pt.upside_high) }}%</td></tr>
+      <td class="qval {{ 'good' if pt.upside_high is not none and pt.upside_high >= 0 else 'bad' if pt.upside_high is not none else '' }}" style="text-align:right">
+        {% if pt.upside_high is not none %}{{ '%+.1f'|format(pt.upside_high) }}%{% else %}—{% endif %}</td></tr>
     {% endif %}
     </tbody>
   </table>

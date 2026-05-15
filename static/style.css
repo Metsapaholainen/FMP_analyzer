@@ -6,6 +6,7 @@
   --mute: #9aa1ad;
   --accent: #6db4ff;
   --good: #5dd39e;
+  --green: #5dd39e;
   --warn: #f5b942;
   --bad: #ff6b6b;
   --border: #262a35;
@@ -1256,6 +1257,7 @@ table.guidance-tracker td:first-child { width: 40%; }
 .pt-rating-hold { background: rgba(250,204,21,0.15);  color: #ca8a04;     border: 1px solid rgba(250,204,21,0.3); }
 .pt-rating-sell { background: rgba(248,113,113,0.15); color: var(--bad);  border: 1px solid rgba(248,113,113,0.3); }
 .pt-analysts { font-size: 0.75rem; color: var(--mute); }
+.pt-updated  { font-size: 0.68rem; color: var(--mute); margin-left: auto; }
 .pt-warning {
   font-size: 0.75rem;
   color: var(--warn);
@@ -1263,6 +1265,15 @@ table.guidance-tracker td:first-child { width: 40%; }
   padding: 2px 8px;
   border-radius: 4px;
   border: 1px solid rgba(245,158,11,0.25);
+}
+.pt-currency-note {
+  font-size: 0.73rem;
+  color: var(--warn);
+  background: rgba(245,158,11,0.08);
+  border-left: 3px solid var(--warn);
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 12px;
 }
 
 /* Buy / Hold / Sell segmented bar */
@@ -1289,31 +1300,42 @@ table.guidance-tracker td:first-child { width: 40%; }
 .pt-range-wrap { margin-bottom: 8px; }
 .pt-range-track {
   position: relative;
-  height: 20px;
-  margin: 24px 0 6px;
+  height: 28px;
+  margin: 28px 0 4px;
+}
+/* Thin grey base rail */
+.pt-range-track::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 0; right: 0;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  transform: translateY(-50%);
 }
 .pt-range-fill {
   position: absolute;
   top: 50%;
   left: 0; right: 0;
-  height: 6px;
+  height: 8px;
   transform: translateY(-50%);
-  background: linear-gradient(to right, var(--bad) 0%, var(--warn) 40%, var(--green) 100%);
-  border-radius: 3px;
-  opacity: 0.55;
+  background: linear-gradient(to right, var(--bad) 0%, var(--warn) 45%, var(--green) 100%);
+  border-radius: 4px;
+  opacity: 0.70;
 }
 .pt-marker {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 12px; height: 12px;
+  width: 14px; height: 14px;
   border-radius: 50%;
-  z-index: 2;
+  z-index: 3;
   cursor: default;
+  box-shadow: 0 0 0 2px var(--card);
 }
 .pt-marker-med  { background: #a78bfa; border: 2px solid #7c3aed; }
 .pt-marker-avg  { background: #60a5fa; border: 2px solid #2563eb; }
-.pt-marker-price { width: 14px; height: 14px; border: 2px solid white; }
+.pt-marker-price { width: 16px; height: 16px; border: 2px solid #fff; z-index: 4; }
 .pt-marker-price.above { background: var(--bad); }
 .pt-marker-price.below { background: var(--green); }
 .pt-price-label {
@@ -1335,7 +1357,37 @@ table.guidance-tracker td:first-child { width: 40%; }
   justify-content: space-between;
   font-size: 0.72rem;
   color: var(--mute);
+  margin-bottom: 2px;
 }
+.pt-range-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.68rem;
+  color: var(--mute);
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.pt-range-legend span:not(.pt-legend-dot) { margin-right: 10px; }
+.pt-legend-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.pt-legend-dot.med  { background: #a78bfa; }
+.pt-legend-dot.avg  { background: #60a5fa; }
+.pt-legend-dot.now.above { background: var(--bad); }
+.pt-legend-dot.now.below { background: var(--green); }
+.pt-range-note {
+  font-size: 0.72rem;
+  padding: 4px 10px;
+  border-radius: 5px;
+  margin-bottom: 8px;
+}
+.pt-range-note.above-range { background: rgba(255,107,107,0.12); color: var(--bad); border-left: 3px solid var(--bad); }
+.pt-range-note.below-range { background: rgba(93,211,158,0.12); color: var(--green); border-left: 3px solid var(--green); }
 
 /* Price target table */
 .pt-table { width: 100%; }
@@ -1663,7 +1715,12 @@ ol.ai-watch-list li[data-n="1"]::before {
   .pt-range-fill { opacity: 0.7 !important; }
   .pt-marker-price.above { background: #dc2626 !important; }
   .pt-marker-price.below { background: #16a34a !important; }
+  .pt-legend-dot.now.above { background: #dc2626 !important; }
+  .pt-legend-dot.now.below { background: #16a34a !important; }
+  .pt-range-note.above-range { background: #fee2e2 !important; color: #991b1b !important; }
+  .pt-range-note.below-range { background: #dcfce7 !important; color: #15803d !important; }
   .pt-warning { background: #fef3c7 !important; color: #92400e !important; }
+  .pt-currency-note { background: #fef3c7 !important; color: #92400e !important; border-left-color: #d97706 !important; }
   .cyo-value { color: #0f172a !important; }
   .cyo-yoy.pos { color: #15803d !important; }
   .cyo-yoy.neg { color: #dc2626 !important; }
