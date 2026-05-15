@@ -188,7 +188,28 @@ def detect_red_flags(raw: dict, fundamentals: dict) -> list[dict]:
                            "Financial fragility is elevated — monitor liquidity carefully."),
             })
 
-    # 10. Discontinued operations materially inflate headline net income
+    # 10. OCF >> reported EBIT — non-cash charges likely masking true profitability
+    # Fires when operating cash flow is 2.5× or more of reported operating income.
+    # Common causes: restructuring charges, purchase-price amortization (e.g. Nokia,
+    # Ericsson post-M&A). Annualised GAAP figures understate the business's true
+    # earning power; look for "comparable/adjusted" figures in company reports.
+    ocf_ttm  = _safe(cf_ttm.get("operatingCashFlow") or cf_ttm.get("netCashProvidedByOperatingActivities"))
+    ebit_ttm = _safe(income_ttm.get("operatingIncome"))
+    if ocf_ttm and ebit_ttm and ebit_ttm > 0 and ocf_ttm / ebit_ttm >= 2.5:
+        _ratio = round(ocf_ttm / ebit_ttm, 1)
+        flags.append({
+            "code": "ocf_ebit_gap",
+            "severity": "medium",
+            "title": f"Operating cash flow is {_ratio}× reported EBIT — significant non-cash charges",
+            "detail": (
+                f"OCF ({ocf_ttm/1e9:.1f}B) is {_ratio}× reported operating income ({ebit_ttm/1e9:.1f}B). "
+                "Large restructuring charges or acquired-intangible amortization are likely depressing "
+                "GAAP earnings vs. actual cash-earning power. Check the company's 'comparable' or "
+                "'adjusted' operating profit — GAAP-based P/E and ROIC will appear worse than reality."
+            ),
+        })
+
+    # 11. Discontinued operations materially inflate headline net income
     if snap.get("discops_material"):
         ni_all = _safe(snap.get("net_income_all_ttm")) or 0.0
         ni_cont = _safe(snap.get("net_income_ttm")) or 0.0

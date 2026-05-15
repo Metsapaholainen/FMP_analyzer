@@ -465,6 +465,12 @@
 <section class="card">
   <h2>{{ cyo.year }} outlook — current year in progress</h2>
   <p class="sub cyo-meta">{{ cyo.quarters_label }}{% if cyo.guidance_text %} &nbsp;·&nbsp; <em>{{ cyo.guidance_text }}</em>{% endif %}</p>
+  {% if cyo.has_q4_skew %}
+  <div class="cyo-warning">⚠ Strong Q4 seasonality detected (Q4/Q1 = {{ cyo.q4_q1_skew }}×) — Q1-only annualisation likely understates full-year revenue and earnings. Actual full-year figures will be significantly higher.</div>
+  {% endif %}
+  {% if cyo.has_earnings_adj_risk %}
+  <div class="cyo-warning">⚠ Non-cash charges alert — prior-year operating cash flow was {{ cyo.ocf_ebit_ratio }}× reported EBIT. Large restructuring or amortisation charges likely depress GAAP earnings vs. the company's own "comparable/adjusted" figures. EBIT projection below is based on GAAP; see guidance (if available) for a better comparable-basis estimate.</div>
+  {% endif %}
   <div class="cyo-grid">
     {% for m in cyo.metrics %}
     {% if m.is_pct %}
@@ -1025,47 +1031,122 @@
   <p class="hint">{{ v.cash_return.definition }}</p>
   {% endif %}
 
-  {% if v.analyst %}
+  {# ── Analyst Price Target Panel ── #}
+  {% set pt = report.ai_step4._price_targets if report.ai_step4 else none %}
+  {% if pt %}
+  {% set _price = pt.current_price %}
+  <h3>Analyst price targets &amp; consensus</h3>
+
+  {# Rating + count strip #}
+  <div class="pt-header">
+    {% if pt.rating %}
+    {% set _rat_cls = 'pt-rating-buy' if pt.rating in ['Strong Buy','Buy'] else 'pt-rating-hold' if pt.rating == 'Hold' else 'pt-rating-sell' %}
+    <span class="pt-rating {{ _rat_cls }}">{{ pt.rating }}</span>
+    {% endif %}
+    {% if pt.total_analysts %}
+    <span class="pt-analysts">{{ pt.total_analysts }} analyst{{ 's' if pt.total_analysts != 1 else '' }}</span>
+    {% endif %}
+    {% if pt.significantly_above_consensus %}
+    <span class="pt-warning">⚠ Stock trading {{ '%+.0f'|format(pt.price_vs_consensus) }}% above consensus target</span>
+    {% endif %}
+  </div>
+
+  {# Buy / Hold / Sell bar #}
+  {% if pt.total_analysts and pt.buy is not none %}
+  {% set _buy_pct  = (pt.buy  / pt.total_analysts * 100) | round(0) %}
+  {% set _hold_pct = ((pt.hold or 0) / pt.total_analysts * 100) | round(0) %}
+  {% set _sell_pct = ((pt.sell or 0) / pt.total_analysts * 100) | round(0) %}
+  <div class="pt-bhs-wrap">
+    <div class="pt-bhs-bar">
+      {% if _buy_pct > 0  %}<div class="pt-bhs-seg buy"  style="width:{{ _buy_pct  }}%" title="Buy: {{ pt.buy }}"></div>{% endif %}
+      {% if _hold_pct > 0 %}<div class="pt-bhs-seg hold" style="width:{{ _hold_pct }}%" title="Hold: {{ pt.hold }}"></div>{% endif %}
+      {% if _sell_pct > 0 %}<div class="pt-bhs-seg sell" style="width:{{ _sell_pct }}%" title="Sell: {{ pt.sell }}"></div>{% endif %}
+    </div>
+    <div class="pt-bhs-labels">
+      <span class="pt-bhs-lbl buy">Buy {{ pt.buy }}</span>
+      {% if pt.hold %}<span class="pt-bhs-lbl hold">Hold {{ pt.hold }}</span>{% endif %}
+      {% if pt.sell %}<span class="pt-bhs-lbl sell">Sell {{ pt.sell }}</span>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# Price range visualisation #}
+  {% if pt.target_low is not none and pt.target_high is not none and _price is not none %}
+  {% set _span   = pt.target_high - pt.target_low %}
+  {% set _lo_pct = 0 %}
+  {% set _hi_pct = 100 %}
+  {# position current price, median, avg within the low→high range #}
+  {% set _cur_pct = ((_price - pt.target_low) / _span * 100) | round(1) if _span > 0 else 50 %}
+  {% set _med_pct = ((pt.target_median - pt.target_low) / _span * 100) | round(1) if (pt.target_median is not none and _span > 0) else none %}
+  {% set _avg_pct = ((pt.target_avg - pt.target_low) / _span * 100) | round(1) if (pt.target_avg is not none and _span > 0) else none %}
+  {# Clamp to 0-100 for display #}
+  {% set _cur_pct_c = [[_cur_pct, 0] | max, 100] | min %}
+  <div class="pt-range-wrap">
+    <div class="pt-range-track">
+      <div class="pt-range-fill"></div>
+      {# Median marker #}
+      {% if _med_pct is not none %}
+      <div class="pt-marker pt-marker-med" style="left:{{ [[_med_pct,0]|max,100]|min }}%" title="Median ${{ pt.target_median }}"></div>
+      {% endif %}
+      {# Average marker #}
+      {% if _avg_pct is not none %}
+      <div class="pt-marker pt-marker-avg" style="left:{{ [[_avg_pct,0]|max,100]|min }}%" title="Average ${{ pt.target_avg }}"></div>
+      {% endif %}
+      {# Current price marker — red if above avg, green if below #}
+      {% set _above_avg = (_price > (pt.target_avg or pt.target_median or pt.target_high)) %}
+      <div class="pt-marker pt-marker-price {{ 'above' if _above_avg else 'below' }}"
+           style="left:{{ _cur_pct_c }}%" title="Current ${{ _price }}">
+        <span class="pt-price-label">Now ${{ _price }}</span>
+      </div>
+    </div>
+    <div class="pt-range-endpoints">
+      <span>Low ${{ pt.target_low }}</span>
+      <span>High ${{ pt.target_high }}</span>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Summary table #}
+  <div class="tablewrap" style="margin-top:10px">
+  <table class="pt-table">
+    <thead><tr>
+      <th>Target</th><th>Price</th><th>vs Current</th>
+    </tr></thead>
+    <tbody>
+    {% if pt.target_low is not none %}
+    <tr><td>Low</td><td>${{ pt.target_low }}</td>
+      <td class="qval {{ 'good' if pt.upside_low >= 0 else 'bad' }}" style="text-align:right">
+        {{ '%+.1f'|format(pt.upside_low) }}%</td></tr>
+    {% endif %}
+    {% if pt.target_median is not none %}
+    <tr><td>Median</td><td><strong>${{ pt.target_median }}</strong></td>
+      <td class="qval {{ 'good' if pt.upside_median >= 0 else 'bad' }}" style="text-align:right">
+        <strong>{{ '%+.1f'|format(pt.upside_median) }}%</strong></td></tr>
+    {% endif %}
+    {% if pt.target_avg is not none %}
+    <tr><td>Average</td><td>${{ pt.target_avg }}</td>
+      <td class="qval {{ 'good' if pt.upside_avg >= 0 else 'bad' }}" style="text-align:right">
+        {{ '%+.1f'|format(pt.upside_avg) }}%</td></tr>
+    {% endif %}
+    {% if pt.target_high is not none %}
+    <tr><td>High</td><td>${{ pt.target_high }}</td>
+      <td class="qval {{ 'good' if pt.upside_high >= 0 else 'bad' }}" style="text-align:right">
+        {{ '%+.1f'|format(pt.upside_high) }}%</td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint" style="margin-top:6px">Median is less skewed by outlier bull/bear targets than the mean. Use the Low–High range to gauge analyst disagreement. Targets are 12-month price forecasts.</p>
+  {% elif v.analyst %}
+  {# Fallback: legacy simple analyst block if new panel unavailable #}
   <h3>Analyst consensus</h3>
   <div class="kvgrid">
     {% set price = report.fundamentals.snapshot.price %}
-    {% if price %}
-    <div><span>Current price</span><strong>${{ num(price) }}</strong></div>
-    {% endif %}
-    {# Median first — more robust to outlier bear/bull targets #}
-    {% if v.analyst.target_median is not none %}
-    {% set upside_med = ((v.analyst.target_median - price) / price * 100) if price else none %}
-    <div>
-      <span>Median target</span>
-      <strong>${{ num(v.analyst.target_median) }}</strong>
-      {% if upside_med is not none %}
-      <span style="font-size:0.8rem;margin-top:2px;color:{{ 'var(--good)' if upside_med >= 0 else 'var(--bad)' }}">
-        {{ '%+.1f'|format(upside_med) }}% vs current
-      </span>
-      {% endif %}
-    </div>
-    {% endif %}
-    {# Mean (consensus) second — labelled to show it can be skewed by outliers #}
-    {% if v.analyst.target_consensus is not none %}
-    {% set upside = ((v.analyst.target_consensus - price) / price * 100) if price else none %}
-    <div>
-      <span>Consensus target <span style="font-size:0.75rem;font-weight:400;color:var(--mute)">(mean)</span></span>
-      <strong>${{ num(v.analyst.target_consensus) }}</strong>
-      {% if upside is not none %}
-      <span style="font-size:0.8rem;margin-top:2px;color:{{ 'var(--good)' if upside >= 0 else 'var(--bad)' }}">
-        {{ '%+.1f'|format(upside) }}% vs current
-      </span>
-      {% endif %}
-    </div>
-    {% endif %}
-    {% if v.analyst.target_high is not none %}
-    <div><span>High / Low target</span><strong>${{ num(v.analyst.target_high) }} / ${{ num(v.analyst.target_low) }}</strong></div>
-    {% endif %}
-    {% if v.analyst.buy is not none %}
-    <div><span>Buy / Hold / Sell</span><strong>{{ v.analyst.buy }} / {{ v.analyst.hold or '—' }} / {{ v.analyst.sell or '—' }}</strong></div>
-    {% endif %}
+    {% if v.analyst.target_consensus is not none %}{% set upside = ((v.analyst.target_consensus - price) / price * 100) if price else none %}
+    <div><span>Avg target</span><strong>${{ num(v.analyst.target_consensus) }}</strong>{% if upside is not none %}<span style="font-size:0.8rem;color:{{ 'var(--good)' if upside >= 0 else 'var(--bad)' }}">{{ '%+.1f'|format(upside) }}%</span>{% endif %}</div>{% endif %}
+    {% if v.analyst.target_high is not none %}<div><span>High / Low</span><strong>${{ num(v.analyst.target_high) }} / ${{ num(v.analyst.target_low) }}</strong></div>{% endif %}
+    {% if v.analyst.buy is not none %}<div><span>Buy / Hold / Sell</span><strong>{{ v.analyst.buy }} / {{ v.analyst.hold or '—' }} / {{ v.analyst.sell or '—' }}</strong></div>{% endif %}
   </div>
-  <p class="hint" style="margin-top:6px">Median target is the midpoint of analyst estimates and is less affected by extreme outlier targets than the mean. Use the High/Low range to judge analyst disagreement.</p>
   {% endif %}
 
   {# Forward analyst revenue & EPS estimates #}

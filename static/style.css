@@ -1225,6 +1225,124 @@ table.guidance-tracker td:first-child { width: 40%; }
   font-style: italic;
 }
 
+/* ── CYO warning banner ─────────────────────────────────────────────── */
+.cyo-warning {
+  background: rgba(245,158,11,0.10);
+  border: 1px solid rgba(245,158,11,0.30);
+  border-radius: 6px;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.80rem;
+  color: var(--warn);
+  margin-bottom: 0.75rem;
+  line-height: 1.4;
+}
+
+/* ── Analyst Price Target Panel ─────────────────────────────────────── */
+.pt-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.pt-rating {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.02em;
+}
+.pt-rating-buy  { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+.pt-rating-hold { background: rgba(250,204,21,0.15);  color: #ca8a04;     border: 1px solid rgba(250,204,21,0.3); }
+.pt-rating-sell { background: rgba(248,113,113,0.15); color: var(--bad);  border: 1px solid rgba(248,113,113,0.3); }
+.pt-analysts { font-size: 0.75rem; color: var(--mute); }
+.pt-warning {
+  font-size: 0.75rem;
+  color: var(--warn);
+  background: rgba(245,158,11,0.10);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(245,158,11,0.25);
+}
+
+/* Buy / Hold / Sell segmented bar */
+.pt-bhs-wrap { margin-bottom: 14px; }
+.pt-bhs-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--card);
+  margin-bottom: 5px;
+}
+.pt-bhs-seg { height: 100%; transition: width 0.3s; }
+.pt-bhs-seg.buy  { background: #4ade80; }
+.pt-bhs-seg.hold { background: #facc15; }
+.pt-bhs-seg.sell { background: #f87171; }
+.pt-bhs-labels { display: flex; gap: 14px; }
+.pt-bhs-lbl { font-size: 0.70rem; font-weight: 600; }
+.pt-bhs-lbl.buy  { color: #4ade80; }
+.pt-bhs-lbl.hold { color: #ca8a04; }
+.pt-bhs-lbl.sell { color: #f87171; }
+
+/* Price range track */
+.pt-range-wrap { margin-bottom: 8px; }
+.pt-range-track {
+  position: relative;
+  height: 20px;
+  margin: 24px 0 6px;
+}
+.pt-range-fill {
+  position: absolute;
+  top: 50%;
+  left: 0; right: 0;
+  height: 6px;
+  transform: translateY(-50%);
+  background: linear-gradient(to right, var(--bad) 0%, var(--warn) 40%, var(--green) 100%);
+  border-radius: 3px;
+  opacity: 0.55;
+}
+.pt-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  z-index: 2;
+  cursor: default;
+}
+.pt-marker-med  { background: #a78bfa; border: 2px solid #7c3aed; }
+.pt-marker-avg  { background: #60a5fa; border: 2px solid #2563eb; }
+.pt-marker-price { width: 14px; height: 14px; border: 2px solid white; }
+.pt-marker-price.above { background: var(--bad); }
+.pt-marker-price.below { background: var(--green); }
+.pt-price-label {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.62rem;
+  white-space: nowrap;
+  color: var(--fg);
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-bottom: 3px;
+  pointer-events: none;
+}
+.pt-range-endpoints {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--mute);
+}
+
+/* Price target table */
+.pt-table { width: 100%; }
+.pt-table th { font-size: 0.72rem; color: var(--mute); text-transform: uppercase; font-weight: 600; }
+.pt-table td, .pt-table th { padding: 5px 8px; }
+.pt-table tbody tr:hover { background: rgba(255,255,255,0.04); }
+
 footer { margin-top: 30px; }
 
 /* ── DCF Scenario Analysis (Step 3) ────────────────────── */
@@ -1534,7 +1652,18 @@ ol.ai-watch-list li[data-n="1"]::before {
   .roic-bar.bad   { background: #ef4444 !important; opacity: 0.85; }
   .roic-wacc-line { background: #94a3b8 !important; }
   .proj-bar { border-color: #6b7280 !important; }
+  .cyo-warning { background: #fef3c7 !important; color: #92400e !important; border-color: #fbbf24 !important; }
   .cyo-card { background: #f8fafc !important; border-left-color: #6366f1 !important; }
+  .pt-rating-buy  { background: #dcfce7 !important; color: #15803d !important; }
+  .pt-rating-hold { background: #fef9c3 !important; color: #854d0e !important; }
+  .pt-rating-sell { background: #fee2e2 !important; color: #991b1b !important; }
+  .pt-bhs-seg.buy  { background: #16a34a !important; }
+  .pt-bhs-seg.hold { background: #ca8a04 !important; }
+  .pt-bhs-seg.sell { background: #dc2626 !important; }
+  .pt-range-fill { opacity: 0.7 !important; }
+  .pt-marker-price.above { background: #dc2626 !important; }
+  .pt-marker-price.below { background: #16a34a !important; }
+  .pt-warning { background: #fef3c7 !important; color: #92400e !important; }
   .cyo-value { color: #0f172a !important; }
   .cyo-yoy.pos { color: #15803d !important; }
   .cyo-yoy.neg { color: #dc2626 !important; }

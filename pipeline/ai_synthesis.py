@@ -1392,6 +1392,25 @@ def _build_current_year_projection(raw: dict, fundamentals: dict | None = None,
     curr_cf_q = cf_by_year.get(current_year, [])[:n]
     ytd_fcf   = _qsum(curr_cf_q, "freeCashFlow")
 
+    # ── Seasonality: is Q4 much heavier than Q1? (Nokia-style) ─────────────────
+    # Only meaningful when projecting from Q1 alone
+    q4_q1_skew  = None
+    has_q4_skew = False
+    if n == 1 and len(income_q) >= 5:
+        prior_periods: dict[str, float] = {}
+        for q in income_q[1:]:
+            yr_q     = str(q.get("calendarYear") or (q.get("date") or "")[:4] or "")
+            period_q = (q.get("period") or "").upper()
+            rev_q    = _s(q.get("revenue"))
+            if yr_q and rev_q is not None:
+                if "Q4" in period_q:
+                    prior_periods.setdefault("Q4", rev_q)
+                elif "Q1" in period_q:
+                    prior_periods.setdefault("Q1", rev_q)
+        if "Q4" in prior_periods and "Q1" in prior_periods and prior_periods["Q1"] > 0:
+            q4_q1_skew  = round(prior_periods["Q4"] / prior_periods["Q1"], 2)
+            has_q4_skew = q4_q1_skew >= 1.30
+
     # ── Projected full-year ───────────────────────────────────────────────────────
     proj_rev    = ytd_rev    * scale if ytd_rev    is not None else None
     proj_ebit   = ytd_ebit   * scale if ytd_ebit   is not None else None
@@ -1443,10 +1462,27 @@ def _build_current_year_projection(raw: dict, fundamentals: dict | None = None,
                     hi = float(m.group(2).replace(",", "."))
                     mid = (lo + hi) / 2.0
                     guidance_ebit_raw  = mid * 1e9
-                    guidance_ebit_text = f"{lo:.1f}–{hi:.1f}B guidance range"
+                    # Detect if the guidance is described as "comparable" or "adjusted"
+                    _ctx = pr_text[max(0, m.start()-80):m.end()+80].lower()
+                    _is_comparable = any(w in _ctx for w in ("comparable", "adjusted", "non-gaap", "underlying"))
+                    guidance_ebit_text = (
+                        f"{lo:.1f}–{hi:.1f}B comparable operating profit guidance"
+                        if _is_comparable else
+                        f"{lo:.1f}–{hi:.1f}B guidance range"
+                    )
                 except (ValueError, IndexError):
                     pass
                 break
+
+    # ── OCF vs reported EBIT ratio: detect non-cash charges masking profitability ──
+    # When FCF or OCF >> reported EBIT, restructuring/amortization likely depresses
+    # GAAP earnings significantly vs. the company's own "comparable/adjusted" figures.
+    has_earnings_adj_risk = False
+    ocf_ebit_ratio = None
+    prior_ocf = _s(prior_cf_rec.get("operatingCashFlow") or prior_cf_rec.get("netCashProvidedByOperatingActivities"))
+    if prior_ebit is not None and prior_ocf is not None and prior_ebit > 0:
+        ocf_ebit_ratio = round(prior_ocf / prior_ebit, 1)
+        has_earnings_adj_risk = ocf_ebit_ratio >= 2.5
 
     # ── ROIC projection row ───────────────────────────────────────────────────────
     roic_proj_row = None
@@ -1569,13 +1605,17 @@ def _build_current_year_projection(raw: dict, fundamentals: dict | None = None,
         return None
 
     return {
-        "year":           current_year,
-        "n_quarters":     n,
-        "quarters_label": quarters_label,
-        "guidance_text":  guidance_ebit_text,
-        "roic_proj_row":  roic_proj_row,
-        "tie_proj_row":   tie_proj_row,
-        "metrics":        metrics,
+        "year":                   current_year,
+        "n_quarters":             n,
+        "quarters_label":         quarters_label,
+        "guidance_text":          guidance_ebit_text,
+        "has_q4_skew":            has_q4_skew,
+        "q4_q1_skew":             q4_q1_skew,
+        "has_earnings_adj_risk":  has_earnings_adj_risk,
+        "ocf_ebit_ratio":         ocf_ebit_ratio,
+        "roic_proj_row":          roic_proj_row,
+        "tie_proj_row":           tie_proj_row,
+        "metrics":                metrics,
     }
 
 
@@ -2419,6 +2459,96 @@ def _build_forward_estimates(raw: dict, fundamentals: dict | None) -> dict | Non
     }
 
 
+def _build_price_target_panel(raw: dict, fundamentals: dict | None) -> dict | None:
+    """Build analyst price-target panel: low/median/avg/high, buy-hold-sell breakdown,
+    consensus rating label, and upside/downside vs. current price.
+
+    Sources: raw["price_targets"] (price-target-consensus endpoint) and
+             raw["analyst_grades"] (grades-summary endpoint).
+    Returns None if neither source has data.
+    """
+    from .fmp_client import first, listify
+
+    def _s(v):
+        try:
+            x = float(v) if v is not None else None
+            return None if (x is None or x != x) else x
+        except (TypeError, ValueError):
+            return None
+
+    pt  = first(listify(raw.get("price_targets")))
+    gr  = first(listify(raw.get("analyst_grades")))
+
+    if not pt and not gr:
+        return None
+
+    # ── Price targets ─────────────────────────────────────────────────────────────
+    t_low    = _s(pt.get("targetLow"))       if pt else None
+    t_avg    = _s(pt.get("targetConsensus")) if pt else None
+    t_med    = _s(pt.get("targetMedian"))    if pt else None
+    t_high   = _s(pt.get("targetHigh"))      if pt else None
+
+    # Current price for upside/downside calculation
+    snap  = (fundamentals or {}).get("snapshot") or {}
+    price = _s(snap.get("price"))
+
+    def _upside(target):
+        if target is None or price is None or price == 0:
+            return None
+        return round((target - price) / price * 100, 1)
+
+    # ── Buy / Hold / Sell counts ──────────────────────────────────────────────────
+    buy  = ((gr.get("strongBuy") or 0) + (gr.get("buy") or 0)) if gr else None
+    hold = gr.get("hold") if gr else None
+    sell = ((gr.get("sell") or 0) + (gr.get("strongSell") or 0)) if gr else None
+    total = (buy or 0) + (hold or 0) + (sell or 0)
+
+    # ── Consensus rating label ────────────────────────────────────────────────────
+    rating = None
+    if total > 0 and buy is not None:
+        buy_pct = buy / total
+        sell_pct = (sell or 0) / total
+        if buy_pct >= 0.70:
+            rating = "Strong Buy"
+        elif buy_pct >= 0.50:
+            rating = "Buy"
+        elif sell_pct >= 0.40:
+            rating = "Sell"
+        elif sell_pct >= 0.25:
+            rating = "Underperform"
+        else:
+            rating = "Hold"
+
+    # ── Price-above-consensus flag ────────────────────────────────────────────────
+    price_vs_consensus = None
+    significantly_above_consensus = False
+    if t_avg is not None and price is not None and t_avg > 0:
+        price_vs_consensus = round((price - t_avg) / t_avg * 100, 1)
+        significantly_above_consensus = price_vs_consensus > 20  # >20% above mean target
+
+    if not any(x is not None for x in [t_low, t_avg, t_med, t_high, buy]):
+        return None
+
+    return {
+        "target_low":       round(t_low,  2) if t_low  is not None else None,
+        "target_avg":       round(t_avg,  2) if t_avg  is not None else None,
+        "target_median":    round(t_med,  2) if t_med  is not None else None,
+        "target_high":      round(t_high, 2) if t_high is not None else None,
+        "current_price":    round(price,  2) if price  is not None else None,
+        "upside_low":       _upside(t_low),
+        "upside_avg":       _upside(t_avg),
+        "upside_median":    _upside(t_med),
+        "upside_high":      _upside(t_high),
+        "buy":              buy,
+        "hold":             hold,
+        "sell":             sell,
+        "total_analysts":   total if total > 0 else None,
+        "rating":           rating,
+        "price_vs_consensus": price_vs_consensus,
+        "significantly_above_consensus": significantly_above_consensus,
+    }
+
+
 def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
                      raw: dict | None = None,
                      competition: dict | None = None,
@@ -2832,6 +2962,7 @@ def synthesize_step4(fundamental_analysis: dict, snapshot: dict,
     result["_10k_risks"]        = _extract_10k_risks(raw)                             if raw else None
     result["_quarterly_trend"]  = _build_quarterly_trend(raw)                         if raw else None
     result["_forward_estimates"]= _build_forward_estimates(raw, fundamentals)         if raw else None
+    result["_price_targets"]    = _build_price_target_panel(raw, fundamentals)       if raw else None
     # Deep-research synth outputs
     result["_pr_synth"]          = pr_synth_s4
     result["_transcript_synth"]  = transcript_synth_s4
